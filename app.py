@@ -14,135 +14,120 @@ import atexit
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# Source reach data (monthly unique visitors, based on public data)
+# Expanded source reach database (monthly unique visitors, based on SimilarWeb/public data)
 SOURCE_REACH = {
-    'ign': 92_000_000,
-    'gamespot': 40_000_000,
-    'pcgamer': 15_000_000,
-    'eurogamer': 9_000_000,
-    'polygon': 14_000_000,
-    'kotaku': 7_500_000,
-    'gamesradar': 13_000_000,
-    'rockpapershotgun': 5_900_000,
-    'vg247': 2_200_000,
-    'destructoid': 5_300_000,
-    'nintendolife': 6_900_000,
-    'pushsquare': 3_000_000,
-    'trueachievements': 5_000_000,
-    'screenrant': 44_000_000,
-    'gamerant': 23_000_000,
-    'dualshockers': 1_700_000,
-    'gematsu': 1_500_000,
-    'rpgamer': 200_000,
-    'rpgsite': 1_900_000,
-    'gameinformer': 1_600_000,
-    'toucharcade': 365_000,
-    'pocketgamer': 2_200_000,
-    'siliconera': 1_000_000,
-    'rpgfan': 490_000,
-    'mmorpg': 930_000,
-    'shacknews': 1_300_000,
-    'gamingbolt': 590_000,
-    'wccftech': 3_400_000,
-    'pcgamesn': 4_000_000,
-    'gamedaily': 170_000,
-    'videogameschronicle': 4_000_000,
-    'venturebeat': 2_400_000,
-    'gamewatcher': 440_000,
-    'nme': 5_300_000,
-    'metro': 15_000_000,
-    'theguardian': 349_000_000,
-    'nytimes': 676_000_000,
-    'forbes': 78_000_000,
-    'washingtonpost': 89_000_000,
-    'variety': 29_000_000,
-    'vice': 9_800_000,
-    'digitaltrends': 18_000_000,
-    'techradar': 18_000_000,
-    'pcworld': 2_500_000,
-    'pcmag': 14_000_000,
-    'telegraph': 63_000_000,
-    'independent': 62_000_000,
-    'dailystar': 8_800_000,
-    'ladbible': 9_400_000,
-    'dexerto': 4_700_000,
-    'comicbook': 14_000_000,
-    'inverse': 2_300_000,
-    'sportingnews': 15_000_000,
-    'si': 39_000_000,
-    'time': 11_000_000,
-    'radiotimes': 13_000_000,
-    'digitalspy': 9_500_000,
-    'vgchartz': 680_000,
-    'wccftech': 3_400_000,
+    # Major Gaming Sites
+    'ign': 92_000_000, 'gamespot': 40_000_000, 'pcgamer': 15_000_000,
+    'eurogamer': 9_000_000, 'polygon': 14_000_000, 'kotaku': 7_500_000,
+    'gamesradar': 13_000_000, 'rockpapershotgun': 5_900_000,
+    'vg247': 2_200_000, 'destructoid': 5_300_000, 'nintendolife': 6_900_000,
+    'pushsquare': 3_000_000, 'trueachievements': 5_000_000,
+    'screenrant': 44_000_000, 'gamerant': 23_000_000,
+    'dualshockers': 1_700_000, 'gematsu': 1_500_000,
+    'rpgamer': 200_000, 'rpgsite': 1_900_000, 'gameinformer': 1_600_000,
+    'toucharcade': 365_000, 'pocketgamer': 2_200_000,
+    'siliconera': 1_000_000, 'rpgfan': 490_000, 'mmorpg': 930_000,
+    'shacknews': 1_300_000, 'gamingbolt': 590_000, 'wccftech': 3_400_000,
+    'pcgamesn': 4_000_000, 'gamedeveloper': 830_000,
+    'gamedaily': 170_000, 'videogameschronicle': 4_000_000,
+    'venturebeat': 2_400_000, 'gamewatcher': 440_000,
+    'comicbook': 14_000_000, 'dexerto': 4_700_000,
+    
+    # General News (gaming sections)
+    'nme': 5_300_000, 'metro': 15_000_000, 'theguardian': 349_000_000,
+    'nytimes': 676_000_000, 'forbes': 78_000_000,
+    'washingtonpost': 89_000_000, 'variety': 29_000_000,
+    'vice': 9_800_000, 'inverse': 2_300_000,
+    'digitaltrends': 18_000_000, 'techradar': 18_000_000,
+    'pcworld': 2_500_000, 'pcmag': 14_000_000,
+    'telegraph': 63_000_000, 'independent': 62_000_000,
+    'dailystar': 8_800_000, 'ladbible': 9_400_000,
+    'sportingnews': 15_000_000, 'si': 39_000_000,
+    'time': 11_000_000, 'radiotimes': 13_000_000,
+    'digitalspy': 9_500_000, 'vgchartz': 680_000,
     'insider-gaming': 2_200_000,
-    'gamedeveloper': 830_000,
-    '3djuegos': 10_000_000,
-    'meristation': 1_300_000,
-    'hobbyconsolas': 9_000_000,
-    'vandal': 16_000_000,
-    'eurogamer.es': 780_000,
-    'jeuxvideo': 29_000_000,
-    'gameblog': 2_900_000,
-    'jeuxactu': 200_000,
-    'gamepro': 9_000_000,
-    'gamestar': 15_000_000,
-    'giga': 15_000_000,
-    '4players': 2_700_000,
-    'pcgames': 3_200_000,
-    'eurogamer.de': 3_700_000,
-    'everyeye': 7_800_000,
-    'multiplayer': 5_600_000,
-    'spaziogames': 1_000_000,
-    'thegamesmachine': 170_000,
-    'gry-online': 8_100_000,
-    'gram': 1_800_000,
-    'ppe': 5_200_000,
-    'lowcygier': 3_000_000,
-    'ixbt': 7_600_000,
-    'goha': 2_200_000,
-    'rutab': 2_300_000,
-    'riotpixels': 3_000_000,
-    'newxboxone': 730_000,
-    'stratege': 1_700_000,
-    'inven': 51_000_000,
-    'gamer': 800_000,
-    'sector': 1_600_000,
-    'indian': 1_100_000,
-    'gamepressure': 2_300_000,
-    'gry-online': 8_100_000,
-    'levelup': 860_000,
-    'atomix': 540_000,
-    'tierragamer': 150_000,
-    'meups': 780_000,
-    'psxbrasil': 640_000,
-    'tecmundo': 8_100_000,
-    'adrenaline': 2_400_000,
-    'canaltech': 8_300_000,
-    'flowgames': 300_000,
-    'gameshub': 590_000,
-    'stevivor': 130_000,
-    'press-start': 330_000,
-    'wellplayed': 100_000,
-    'checkpointgaming': 82_000,
-    'player2': 23_000,
-    'vooks': 170_000,
-    'shindig': 3_000,
-    'smh': 25_000_000,
-    'Google News': 100_000,  # default for unknown Google News sources
+    'bleedingcool': 3_200_000, 'escapist': 1_300_000,
+    
+    # European Gaming
+    '3djuegos': 10_000_000, 'meristation': 1_300_000,
+    'hobbyconsolas': 9_000_000, 'vandal': 16_000_000,
+    'eurogamer.es': 780_000, 'jeuxvideo': 29_000_000,
+    'gameblog': 2_900_000, 'jeuxactu': 200_000,
+    'gamepro': 9_000_000, 'gamestar': 15_000_000,
+    'giga': 15_000_000, '4players': 2_700_000,
+    'pcgames': 3_200_000, 'eurogamer.de': 3_700_000,
+    'everyeye': 7_800_000, 'multiplayer': 5_600_000,
+    'spaziogames': 1_000_000, 'thegamesmachine': 170_000,
+    'gry-online': 8_100_000, 'gram': 1_800_000,
+    'ppe': 5_200_000, 'lowcygier': 3_000_000,
+    'gamer.nl': 10_000, 'pu.nl': 210_000,
+    'xgn.nl': 450_000, 'gamer.no': 800_000,
+    'gamereactor': 600_000, 'fingerguns': 38_000,
+    'darkzero': 25_000, 'thesixthaxis': 375_000,
+    'purexbox': 2_500_000, 'pureplaystation': 1_500_000,
+    'xboxdynasty': 1_100_000, 'xboxachievements': 580_000,
+    
+    # Asian/Pacific
+    'inven': 51_000_000, 'sector': 1_600_000,
+    'indian': 1_100_000, 'gamepressure': 2_300_000,
+    'ixbt': 7_600_000, 'goha': 2_200_000,
+    'rutab': 2_300_000, 'riotpixels': 3_000_000,
+    'newxboxone': 730_000, 'stratege': 1_700_000,
+    'gameshub': 590_000, 'stevivor': 130_000,
+    'press-start': 330_000, 'wellplayed': 100_000,
+    'checkpointgaming': 82_000, 'player2': 23_000,
+    'vooks': 170_000, 'shindig': 3_000,
+    'smh': 25_000_000, 'vg247': 2_200_000,
+    'vg24': 3_000,
+    
+    # Latin America
+    'levelup': 860_000, 'atomix': 540_000,
+    'tierragamer': 150_000, 'meups': 780_000,
+    'psxbrasil': 640_000, 'tecmundo': 8_100_000,
+    'adrenaline': 2_400_000, 'canaltech': 8_300_000,
+    'flowgames': 300_000, 'gamersrd': 24_000,
+    'psxextreme': 52_000, 'gamersegames': 19_000,
+    'pizzafria': 44_000, 'gamefm': 13_000,
+    'defesaperfeita': 7_000, 'dropsdejogos': 94_000,
+    
+    # Default for unknown sources
+    'Google News': 100_000,
+    'Unknown': 50_000,
 }
 
 def estimate_reach(source_name, url=''):
     """Estimate monthly reach based on source name or URL."""
+    if not source_name:
+        return 50_000
+    
     text = f"{source_name} {url}".lower()
     
-    # Check against known outlets
+    # Direct match first
     for key, reach in SOURCE_REACH.items():
         if key in text:
             return reach
     
-    # If unknown, assign a small default
-    return 50_000  # 50K default for unknown outlets
+    # If no match, estimate based on source characteristics
+    # Major news outlets get higher estimates
+    major_news = ['nytimes', 'guardian', 'washingtonpost', 'forbes', 'wsj', 
+                  'bloomberg', 'reuters', 'bbc', 'cnn', 'telegraph', 'independent']
+    for outlet in major_news:
+        if outlet in text:
+            return 50_000_000  # Major outlets default
+    
+    # Gaming-specific sites get medium estimate
+    gaming_indicators = ['game', 'gaming', 'xbox', 'playstation', 'nintendo', 
+                         'steam', 'esports', 'rpg', 'mmo', 'indie game']
+    if any(ind in text for ind in gaming_indicators):
+        return 200_000  # Small gaming blog default
+    
+    # Tech sites
+    tech_indicators = ['tech', 'digital', 'gadget', 'review', 'ai', 'software']
+    if any(ind in text for ind in tech_indicators):
+        return 500_000  # Tech site default
+    
+    # Regional news
+    return 100_000  # Default for unknown sources
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-key-please-change')
