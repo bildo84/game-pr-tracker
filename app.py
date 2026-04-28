@@ -650,3 +650,21 @@ with app.app_context():
 
 if __name__ == '__main__':
     app.run(debug=True)
+
+@app.route('/fix-db')
+def fix_database():
+    """Temporary route to add missing database columns."""
+    try:
+        # Check if qualifiers column exists
+        from sqlalchemy import inspect, text
+        inspector = inspect(db.engine)
+        columns = [col['name'] for col in inspector.get_columns('game')]
+        
+        if 'qualifiers' not in columns:
+            db.session.execute(text('ALTER TABLE game ADD COLUMN qualifiers TEXT'))
+            db.session.commit()
+            return jsonify({'status': 'success', 'message': 'Added qualifiers column!'})
+        else:
+            return jsonify({'status': 'ok', 'message': 'Qualifiers column already exists.'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)})
