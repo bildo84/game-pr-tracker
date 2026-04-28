@@ -14,6 +14,136 @@ import atexit
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+# Source reach data (monthly unique visitors, based on public data)
+SOURCE_REACH = {
+    'ign': 92_000_000,
+    'gamespot': 40_000_000,
+    'pcgamer': 15_000_000,
+    'eurogamer': 9_000_000,
+    'polygon': 14_000_000,
+    'kotaku': 7_500_000,
+    'gamesradar': 13_000_000,
+    'rockpapershotgun': 5_900_000,
+    'vg247': 2_200_000,
+    'destructoid': 5_300_000,
+    'nintendolife': 6_900_000,
+    'pushsquare': 3_000_000,
+    'trueachievements': 5_000_000,
+    'screenrant': 44_000_000,
+    'gamerant': 23_000_000,
+    'dualshockers': 1_700_000,
+    'gematsu': 1_500_000,
+    'rpgamer': 200_000,
+    'rpgsite': 1_900_000,
+    'gameinformer': 1_600_000,
+    'toucharcade': 365_000,
+    'pocketgamer': 2_200_000,
+    'siliconera': 1_000_000,
+    'rpgfan': 490_000,
+    'mmorpg': 930_000,
+    'shacknews': 1_300_000,
+    'gamingbolt': 590_000,
+    'wccftech': 3_400_000,
+    'pcgamesn': 4_000_000,
+    'gamedaily': 170_000,
+    'videogameschronicle': 4_000_000,
+    'venturebeat': 2_400_000,
+    'gamewatcher': 440_000,
+    'nme': 5_300_000,
+    'metro': 15_000_000,
+    'theguardian': 349_000_000,
+    'nytimes': 676_000_000,
+    'forbes': 78_000_000,
+    'washingtonpost': 89_000_000,
+    'variety': 29_000_000,
+    'vice': 9_800_000,
+    'digitaltrends': 18_000_000,
+    'techradar': 18_000_000,
+    'pcworld': 2_500_000,
+    'pcmag': 14_000_000,
+    'telegraph': 63_000_000,
+    'independent': 62_000_000,
+    'dailystar': 8_800_000,
+    'ladbible': 9_400_000,
+    'dexerto': 4_700_000,
+    'comicbook': 14_000_000,
+    'inverse': 2_300_000,
+    'sportingnews': 15_000_000,
+    'si': 39_000_000,
+    'time': 11_000_000,
+    'radiotimes': 13_000_000,
+    'digitalspy': 9_500_000,
+    'vgchartz': 680_000,
+    'wccftech': 3_400_000,
+    'insider-gaming': 2_200_000,
+    'gamedeveloper': 830_000,
+    '3djuegos': 10_000_000,
+    'meristation': 1_300_000,
+    'hobbyconsolas': 9_000_000,
+    'vandal': 16_000_000,
+    'eurogamer.es': 780_000,
+    'jeuxvideo': 29_000_000,
+    'gameblog': 2_900_000,
+    'jeuxactu': 200_000,
+    'gamepro': 9_000_000,
+    'gamestar': 15_000_000,
+    'giga': 15_000_000,
+    '4players': 2_700_000,
+    'pcgames': 3_200_000,
+    'eurogamer.de': 3_700_000,
+    'everyeye': 7_800_000,
+    'multiplayer': 5_600_000,
+    'spaziogames': 1_000_000,
+    'thegamesmachine': 170_000,
+    'gry-online': 8_100_000,
+    'gram': 1_800_000,
+    'ppe': 5_200_000,
+    'lowcygier': 3_000_000,
+    'ixbt': 7_600_000,
+    'goha': 2_200_000,
+    'rutab': 2_300_000,
+    'riotpixels': 3_000_000,
+    'newxboxone': 730_000,
+    'stratege': 1_700_000,
+    'inven': 51_000_000,
+    'gamer': 800_000,
+    'sector': 1_600_000,
+    'indian': 1_100_000,
+    'gamepressure': 2_300_000,
+    'gry-online': 8_100_000,
+    'levelup': 860_000,
+    'atomix': 540_000,
+    'tierragamer': 150_000,
+    'meups': 780_000,
+    'psxbrasil': 640_000,
+    'tecmundo': 8_100_000,
+    'adrenaline': 2_400_000,
+    'canaltech': 8_300_000,
+    'flowgames': 300_000,
+    'gameshub': 590_000,
+    'stevivor': 130_000,
+    'press-start': 330_000,
+    'wellplayed': 100_000,
+    'checkpointgaming': 82_000,
+    'player2': 23_000,
+    'vooks': 170_000,
+    'shindig': 3_000,
+    'smh': 25_000_000,
+    'Google News': 100_000,  # default for unknown Google News sources
+}
+
+def estimate_reach(source_name, url=''):
+    """Estimate monthly reach based on source name or URL."""
+    text = f"{source_name} {url}".lower()
+    
+    # Check against known outlets
+    for key, reach in SOURCE_REACH.items():
+        if key in text:
+            return reach
+    
+    # If unknown, assign a small default
+    return 50_000  # 50K default for unknown outlets
+
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-key-please-change')
 
@@ -63,7 +193,9 @@ class Article(db.Model):
     sentiment_score = db.Column(db.Float)
     sentiment_label = db.Column(db.String(20))
     relevance_score = db.Column(db.Float)
+    reach = db.Column(db.BigInteger)  # estimated monthly unique visitors
     found_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
 
     __table_args__ = (
         db.UniqueConstraint('game_id', 'url', name='unique_game_article'),
@@ -325,6 +457,8 @@ def save_articles(game, articles_list):
             continue
 
         score, label = analyze_sentiment(f"{title} {description}")
+        reach = estimate_reach(source_name, url)
+        
         article = Article(
             game_id=game.id,
             title=title[:500],
@@ -335,7 +469,8 @@ def save_articles(game, articles_list):
             image_url=art.get('image_url', '')[:1000],
             sentiment_score=score,
             sentiment_label=label,
-            relevance_score=0.8
+            relevance_score=0.8,
+            reach=reach
         )
         db.session.add(article)
         saved += 1
@@ -528,7 +663,7 @@ def analytics_page(game_id):
 
 @app.route('/export/<int:game_id>')
 def export_csv(game_id):
-    """Export articles to CSV"""
+    """Export articles with full metrics (reach, EMV, sentiment)."""
     game = Game.query.get_or_404(game_id)
     try:
         articles = Article.query.filter_by(game_id=game_id).order_by(
@@ -537,27 +672,71 @@ def export_csv(game_id):
 
         si = StringIO()
         writer = csv.writer(si)
-        writer.writerow(['Date', 'Title', 'Source', 'URL', 'Sentiment', 'Sentiment Score'])
+        writer.writerow([
+            'Date', 'Title', 'Source', 'URL', 'Sentiment', 
+            'Sentiment Score', 'Reach (Monthly)', 'EMV (USD)',
+            'Language', 'Region'
+        ])
+
+        # EMV Formula: Reach × CPM ($35) × Sentiment Weight × Article Multiplier
+        CPM = 35  # Cost per 1000 impressions for gaming PR
+        SENTIMENT_WEIGHT = {
+            'positive': 1.2,   # Positive coverage worth more
+            'neutral': 1.0,
+            'negative': 0.8    # Negative still has value (awareness)
+        }
 
         for a in articles:
+            # Calculate EMV
+            base_value = (a.reach or 50000) / 1000 * CPM
+            sentiment_mult = SENTIMENT_WEIGHT.get(a.sentiment_label, 1.0)
+            emv = round(base_value * sentiment_mult, 2)
+
+            # Determine language/region from source
+            lang = 'en'
+            region = 'Global'
+            source_lower = (a.source_name or '').lower()
+            if any(x in source_lower for x in ['de.', '.de', 'germany', 'german']):
+                lang = 'de'; region = 'Germany'
+            elif any(x in source_lower for x in ['fr.', '.fr', 'france', 'french']):
+                lang = 'fr'; region = 'France'
+            elif any(x in source_lower for x in ['es.', '.es', 'spain', 'spanish']):
+                lang = 'es'; region = 'Spain'
+            elif any(x in source_lower for x in ['it.', '.it', 'italy', 'italian']):
+                lang = 'it'; region = 'Italy'
+            elif any(x in source_lower for x in ['pl.', '.pl', 'poland', 'polish']):
+                lang = 'pl'; region = 'Poland'
+            elif any(x in source_lower for x in ['ru.', '.ru', 'russia', 'russian']):
+                lang = 'ru'; region = 'Russia'
+            elif any(x in source_lower for x in ['br.', '.br', 'brazil', 'brazilian']):
+                lang = 'pt'; region = 'Brazil'
+            elif any(x in source_lower for x in ['jp.', '.jp', 'japan', 'japanese']):
+                lang = 'ja'; region = 'Japan'
+            elif any(x in source_lower for x in ['kr.', '.kr', 'korea', 'korean']):
+                lang = 'ko'; region = 'South Korea'
+
             writer.writerow([
                 a.published_at.strftime('%Y-%m-%d') if a.published_at else '',
                 a.title,
                 a.source_name or 'Unknown',
                 a.url,
                 a.sentiment_label or 'neutral',
-                round(a.sentiment_score, 2) if a.sentiment_score else 0
+                round(a.sentiment_score, 2) if a.sentiment_score else 0,
+                f"{a.reach:,}" if a.reach else '50,000',
+                f"${emv:,.2f}",
+                lang,
+                region
             ])
 
         output = BytesIO()
-        output.write(si.getvalue().encode('utf-8'))
+        output.write(si.getvalue().encode('utf-8-sig'))  # UTF-8 BOM for Excel
         output.seek(0)
 
         return send_file(
             output,
             mimetype='text/csv',
             as_attachment=True,
-            download_name=f'{game.name}_PR_Report.csv'
+            download_name=f'{game.name}_PR_Full_Report.csv'
         )
     except Exception as e:
         logger.error(f"Export error for game {game_id}: {str(e)}")
@@ -655,16 +834,26 @@ if __name__ == '__main__':
 def fix_database():
     """Temporary route to add missing database columns."""
     try:
-        # Check if qualifiers column exists
         from sqlalchemy import inspect, text
         inspector = inspect(db.engine)
         columns = [col['name'] for col in inspector.get_columns('game')]
         
+        results = []
+        
         if 'qualifiers' not in columns:
             db.session.execute(text('ALTER TABLE game ADD COLUMN qualifiers TEXT'))
-            db.session.commit()
-            return jsonify({'status': 'success', 'message': 'Added qualifiers column!'})
-        else:
-            return jsonify({'status': 'ok', 'message': 'Qualifiers column already exists.'})
+            results.append('Added qualifiers column')
+        
+        article_columns = [col['name'] for col in inspector.get_columns('article')]
+        if 'reach' not in article_columns:
+            db.session.execute(text('ALTER TABLE article ADD COLUMN reach BIGINT'))
+            results.append('Added reach column')
+        
+        db.session.commit()
+        
+        if not results:
+            results.append('All columns already exist!')
+        
+        return jsonify({'status': 'success', 'messages': results})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)})
