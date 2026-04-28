@@ -79,9 +79,19 @@
                 </div>
             </div>
             
-            {% if article.image_url %}
-            <img src="{{ article.image_url }}" alt="" class="w-24 h-24 object-cover rounded-lg ml-4 flex-shrink-0">
-            {% endif %}
+            <div class="flex items-start space-x-2 ml-4">
+                {% if article.image_url %}
+                <img src="{{ article.image_url }}" alt="" class="w-24 h-24 object-cover rounded-lg flex-shrink-0">
+                {% endif %}
+                <!-- Delete button -->
+                <form action="/delete-article/{{ article.id }}" method="POST" 
+                      onsubmit="return confirm('Delete this article?\n\n{{ article.title[:100] }}...\n\nThis cannot be undone.')">
+                    <button type="submit" title="Delete this article (false positive)"
+                            class="text-red-400 hover:text-red-600 text-lg font-bold px-2 py-1 rounded hover:bg-red-50 transition">
+                        ✕
+                    </button>
+                </form>
+            </div>
         </div>
     </div>
     {% else %}
