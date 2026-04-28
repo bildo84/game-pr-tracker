@@ -482,6 +482,18 @@ def save_articles(game, articles_list):
 
 # ==================== ROUTES ====================
 
+@app.route('/delete-article/<int:article_id>', methods=['POST'])
+def delete_article(article_id):
+    """Delete a single article (for removing false positives)."""
+    article = Article.query.get_or_404(article_id)
+    game_id = article.game_id
+    db.session.delete(article)
+    db.session.commit()
+    logger.info(f"Deleted article: {article.title[:100]}")
+    
+    # Redirect back to the articles page for that game
+    return redirect(url_for('articles_page', game_id=game_id))
+
 @app.route('/')
 def dashboard():
     games = Game.query.filter_by(active=True).all()
