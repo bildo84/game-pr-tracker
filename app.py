@@ -6,8 +6,8 @@ import feedparser
 from textblob import TextBlob
 import json
 import os
-import pandas as pd
-from io import BytesIO
+from io import BytesIO, StringIO
+import csv
 from apscheduler.schedulers.background import BackgroundScheduler
 import logging
 import atexit
@@ -17,7 +17,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-key-please-change')
 
-# Use PostgreSQL if DATABASE_URL is set
+# Use PostgreSQL if DATABASE_URL is set, otherwise SQLite
 database_url = os.getenv('DATABASE_URL')
 if database_url:
     if database_url.startswith('postgres://'):
@@ -32,12 +32,14 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ==================== MODELS ====================
+
 class Game(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(200), nullable=False, unique=True)
     publisher = db.Column(db.String(200))
     platforms = db.Column(db.String(200))
-    keywords = db.Column(db.Text)
+    keywords = db.Column(db.Text)       # JSON array of search keywords
+    qualifiers = db.Column(db.Text)     # JSON array of required context words
     active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     last_searched = db.Column(db.DateTime)
@@ -71,7 +73,7 @@ with app.app_context():
     db.create_all()
 
 # ==================== MULTI-REGION GOOGLE NEWS RSS ====================
-# (country, language) pairs for each region
+
 REGIONS = {
     'NA': [('US','en'), ('CA','en'), ('CA','fr'), ('MX','es')],
     'EMEA': [
@@ -104,7 +106,7 @@ REGIONS = {
 }
 
 def _fetch_single_rss(game_name, country_code, lang_code, when='7d'):
-    """Fetch Google News RSS for one country/language pair, return article list."""
+    """Fetch Google News RSS for one country/language pair."""
     query = urllib.parse.quote(game_name)
     ceid = f'{country_code}:{lang_code}' if lang_code else f'{country_code}'
     url = f"https://news.google.com/rss/search?q={query}&hl={lang_code}-{country_code}&gl={country_code}&ceid={ceid}&when={when}"
@@ -124,7 +126,7 @@ def _fetch_single_rss(game_name, country_code, lang_code, when='7d'):
             articles.append({
                 'title': entry.title,
                 'url': entry.link,
-                'source_name': feed.feed.title if feed.feed.get('title') else f'Google News {country_code}',
+                'source_name': feed.feed.get('title', f'Google News {country_code}'),
                 'published_at': pub_date,
                 'description': entry.get('summary', '')[:1000],
                 'image_url': ''
@@ -134,8 +136,7 @@ def _fetch_single_rss(game_name, country_code, lang_code, when='7d'):
     return articles
 
 def search_google_news_rss(game_name, when='7d'):
-    """Search across all defined regions (in parallel), deduplicate by URL."""
-    # Collect all unique (country, language) pairs
+    """Search across all regions in parallel, deduplicate by URL."""
     pairs = set()
     for region_pairs in REGIONS.values():
         for pair in region_pairs:
@@ -148,12 +149,11 @@ def search_google_news_rss(game_name, when='7d'):
             for (cc, lc) in pairs
         }
         for future in as_completed(futures):
-            cc, lc = futures[future]
             try:
                 result = future.result()
                 all_articles.extend(result)
             except Exception as e:
-                logger.warning(f"Future error for {cc}/{lc}: {e}")
+                logger.warning(f"Future error: {e}")
 
     # Deduplicate by URL
     seen_urls = set()
@@ -163,7 +163,7 @@ def search_google_news_rss(game_name, when='7d'):
             seen_urls.add(art['url'])
             unique_articles.append(art)
 
-    logger.info(f"Google News RSS: {len(unique_articles)} unique articles for '{game_name}' across regions")
+    logger.info(f"Google News RSS: {len(unique_articles)} unique articles for '{game_name}'")
     return unique_articles
 
 def search_gnews_api(game_name, start_date=None, end_date=None, days_back=1):
@@ -206,11 +206,7 @@ def search_gnews_api(game_name, start_date=None, end_date=None, days_back=1):
         return []
 
 def fetch_all_articles(game, start_date=None, end_date=None):
-    """
-    Combine Google News RSS + GNews API.
-    For date range, Google News RSS uses 'when' parameter,
-    so we fetch a wide window (30d) and filter manually.
-    """
+    """Combine Google News RSS + GNews API, with date filtering."""
     if start_date and end_date:
         delta = max((end_date - start_date).days, 1)
         when = f'{delta}d'
@@ -238,6 +234,50 @@ def fetch_all_articles(game, start_date=None, end_date=None):
             unique.append(art)
     return unique
 
+# ==================== FALSE-POSITIVE FILTERING ====================
+
+def is_gaming_article(title, description, game_name, qualifiers=None):
+    """Check if article is actually about the game, not a false positive."""
+    text = f"{title} {description}".lower()
+    game_lower = game_name.lower()
+
+    default_gaming_terms = [
+        'game', 'gaming', 'xbox', 'playstation', 'ps5', 'ps4', 'nintendo',
+        'switch', 'steam', 'pc game', 'video game', 'dlc', 'update', 'patch',
+        'developer', 'studio', 'release', 'launch', 'trailer', 'gameplay',
+        'rpg', 'fps', 'indie', 'esports', 'review', 'score', 'deck'
+    ]
+
+    all_qualifiers = default_gaming_terms.copy()
+    if qualifiers:
+        try:
+            custom = json.loads(qualifiers) if isinstance(qualifiers, str) else qualifiers
+            all_qualifiers.extend([q.lower() for q in custom])
+        except:
+            pass
+
+    for term in all_qualifiers:
+        if term.lower() in text:
+            return True
+    return False
+
+def is_gaming_source(source_name, url=''):
+    """Check if the source appears to be a gaming outlet."""
+    gaming_domains = [
+        'ign', 'gamespot', 'pcgamer', 'eurogamer', 'polygon', 'kotaku',
+        'gamesradar', 'rockpapershotgun', 'vg247', 'destructoid', 'nintendolife',
+        'pushsquare', 'trueachievements', 'screenrant', 'gamerant', 'dualshockers',
+        'gematsu', 'rpgamer', 'rpgsite', 'gameinformer', 'toucharcade',
+        'pocketgamer', 'siliconera', 'rpgfan', 'mmorpg', 'shacknews',
+        'venturebeat/games', 'videogameschronicle', 'gamingbolt', 'wccftech',
+        'gamewatcher', 'pcgamesn', 'gamedeveloper', 'gamedaily', 'gaming',
+        'xbox', 'playstation', 'nintendo', 'steam deck'
+    ]
+    check_text = f"{source_name} {url}".lower()
+    return any(domain in check_text for domain in gaming_domains)
+
+# ==================== SENTIMENT ANALYSIS ====================
+
 def analyze_sentiment(text):
     try:
         blob = TextBlob(text[:1000])
@@ -252,32 +292,61 @@ def analyze_sentiment(text):
     except:
         return 0, 'neutral'
 
+# ==================== SAVE ARTICLES ====================
+
 def save_articles(game, articles_list):
+    """Save articles to database, filtering out false positives."""
     saved = 0
+    skipped = 0
+
+    qualifiers = None
+    if game.qualifiers:
+        try:
+            qualifiers = json.loads(game.qualifiers)
+        except:
+            pass
+
     for art in articles_list:
         existing = Article.query.filter_by(game_id=game.id, url=art['url']).first()
-        if not existing:
-            score, label = analyze_sentiment(
-                f"{art.get('title', '')} {art.get('description', '')}"
-            )
-            article = Article(
-                game_id=game.id,
-                title=art['title'][:500],
-                url=art['url'][:1000],
-                source_name=art.get('source_name', 'Unknown')[:200],
-                published_at=art.get('published_at', datetime.now()),
-                description=art.get('description', ''),
-                image_url=art.get('image_url', '')[:1000],
-                sentiment_score=score,
-                sentiment_label=label,
-                relevance_score=0.8
-            )
-            db.session.add(article)
-            saved += 1
+        if existing:
+            continue
+
+        title = art.get('title', '')
+        description = art.get('description', '')
+        source_name = art.get('source_name', '')
+        url = art.get('url', '')
+
+        # Gaming filter
+        is_gaming = is_gaming_article(title, description, game.name, qualifiers)
+        is_gaming_src = is_gaming_source(source_name, url)
+
+        if not is_gaming and not is_gaming_src:
+            skipped += 1
+            continue
+
+        score, label = analyze_sentiment(f"{title} {description}")
+        article = Article(
+            game_id=game.id,
+            title=title[:500],
+            url=url[:1000],
+            source_name=source_name[:200],
+            published_at=art.get('published_at', datetime.now()),
+            description=description[:1000] if description else '',
+            image_url=art.get('image_url', '')[:1000],
+            sentiment_score=score,
+            sentiment_label=label,
+            relevance_score=0.8
+        )
+        db.session.add(article)
+        saved += 1
+
     db.session.commit()
+    if skipped > 0:
+        logger.info(f"Filtered out {skipped} non-gaming articles for '{game.name}'")
     return saved
 
 # ==================== ROUTES ====================
+
 @app.route('/')
 def dashboard():
     games = Game.query.filter_by(active=True).all()
@@ -310,16 +379,28 @@ def add_game():
     publisher = request.form.get('publisher', '').strip()
     platforms = request.form.get('platforms', '').strip()
     keywords_str = request.form.get('keywords', '').strip()
+    qualifiers_str = request.form.get('qualifiers', '').strip()
+
     if not name:
         return redirect(url_for('games_page'))
+
     keywords = [k.strip() for k in keywords_str.split(',') if k.strip()] if keywords_str else []
+    qualifiers = [q.strip() for q in qualifiers_str.split(',') if q.strip()] if qualifiers_str else []
+
     existing = Game.query.filter_by(name=name).first()
     if existing:
         return redirect(url_for('games_page'))
-    game = Game(name=name, publisher=publisher, platforms=platforms,
-                keywords=json.dumps(keywords))
+
+    game = Game(
+        name=name,
+        publisher=publisher,
+        platforms=platforms,
+        keywords=json.dumps(keywords),
+        qualifiers=json.dumps(qualifiers)
+    )
     db.session.add(game)
     db.session.commit()
+
     articles = fetch_all_articles(game)
     count = save_articles(game, articles)
     game.last_searched = datetime.utcnow()
@@ -423,7 +504,7 @@ def analytics_page(game_id):
         'negative': sum(1 for a in articles if a.sentiment_label == 'negative'),
         'neutral': sum(1 for a in articles if a.sentiment_label == 'neutral')
     }
-    avg_sentiment = sum(a.sentiment_score for a in articles) / len(articles) if articles else 0
+    avg_sentiment = sum(a.sentiment_score or 0 for a in articles) / len(articles) if articles else 0
     daily_data = {}
     for a in articles:
         if a.published_at:
@@ -447,18 +528,17 @@ def analytics_page(game_id):
 
 @app.route('/export/<int:game_id>')
 def export_csv(game_id):
-    """Export articles to CSV (more memory-efficient than Excel on free tier)"""
+    """Export articles to CSV"""
     game = Game.query.get_or_404(game_id)
     try:
         articles = Article.query.filter_by(game_id=game_id).order_by(
             Article.published_at.desc()
         ).all()
 
-        # Build CSV in memory as string
-        import csv
-        output = BytesIO()
-        writer = csv.writer(output)
-        writer.writerow(['Date', 'Title', 'Source', 'URL', 'Sentiment', 'Sentiment Score', 'Relevance Score'])
+        si = StringIO()
+        writer = csv.writer(si)
+        writer.writerow(['Date', 'Title', 'Source', 'URL', 'Sentiment', 'Sentiment Score'])
+
         for a in articles:
             writer.writerow([
                 a.published_at.strftime('%Y-%m-%d') if a.published_at else '',
@@ -466,48 +546,53 @@ def export_csv(game_id):
                 a.source_name or 'Unknown',
                 a.url,
                 a.sentiment_label or 'neutral',
-                round(a.sentiment_score, 2) if a.sentiment_score else 0,
-                round(a.relevance_score, 2) if a.relevance_score else 0
+                round(a.sentiment_score, 2) if a.sentiment_score else 0
             ])
+
+        output = BytesIO()
+        output.write(si.getvalue().encode('utf-8'))
         output.seek(0)
+
         return send_file(
             output,
             mimetype='text/csv',
             as_attachment=True,
-            download_name=f'{game.name}_PR_Report_{datetime.now().strftime("%Y%m%d")}.csv'
+            download_name=f'{game.name}_PR_Report.csv'
         )
     except Exception as e:
-        logger.error(f"Export error for game {game_id}: {e}")
-        return jsonify({'error': 'Export failed, please try again'}), 500
+        logger.error(f"Export error for game {game_id}: {str(e)}")
+        return jsonify({'error': f'Export failed: {str(e)}'}), 500
 
 @app.route('/api/weekly-report')
 def weekly_report():
+    """Generate weekly PR report"""
     try:
         week_ago = datetime.now() - timedelta(days=7)
         games = Game.query.filter_by(active=True).all()
-        if not games:
-            return jsonify({'error': 'No games found'}), 404
 
-        import csv
-        output = BytesIO()
-        writer = csv.writer(output)
-        writer.writerow(['Game', 'Total Articles', 'Positive', 'Negative', 'Neutral', 'Avg Sentiment', 'Top Sources'])
+        si = StringIO()
+        writer = csv.writer(si)
+        writer.writerow(['Game', 'Total Articles', 'Positive', 'Negative', 'Neutral', 'Avg Sentiment'])
+
         for game in games:
             articles = Article.query.filter(
                 Article.game_id == game.id,
                 Article.published_at >= week_ago
             ).all()
+
             if articles:
-                writer.writerow([
-                    game.name,
-                    len(articles),
-                    sum(1 for a in articles if a.sentiment_label == 'positive'),
-                    sum(1 for a in articles if a.sentiment_label == 'negative'),
-                    sum(1 for a in articles if a.sentiment_label == 'neutral'),
-                    round(sum(a.sentiment_score for a in articles) / len(articles), 2) if articles else 0,
-                    ', '.join(set(a.source_name for a in articles)[:3])
-                ])
+                total = len(articles)
+                pos = sum(1 for a in articles if a.sentiment_label == 'positive')
+                neg = sum(1 for a in articles if a.sentiment_label == 'negative')
+                neu = sum(1 for a in articles if a.sentiment_label == 'neutral')
+                avg = round(sum(a.sentiment_score or 0 for a in articles) / total, 2) if total > 0 else 0
+
+                writer.writerow([game.name, total, pos, neg, neu, avg])
+
+        output = BytesIO()
+        output.write(si.getvalue().encode('utf-8'))
         output.seek(0)
+
         return send_file(
             output,
             mimetype='text/csv',
@@ -515,15 +600,15 @@ def weekly_report():
             download_name=f'Weekly_PR_Report_{datetime.now().strftime("%Y%m%d")}.csv'
         )
     except Exception as e:
-        logger.error(f"Weekly report error: {e}")
-        return jsonify({'error': 'Report generation failed'}), 500
+        logger.error(f"Weekly report error: {str(e)}")
+        return jsonify({'error': f'Report generation failed: {str(e)}'}), 500
 
-
-
+# Health check endpoint for cron-job.org
 @app.route('/ping')
 def ping():
-    return jsonify({'status': 'ok'})
+    return jsonify({'status': 'ok', 'timestamp': datetime.utcnow().isoformat()})
 
+# Daily search trigger (called by cron-job.org)
 @app.route('/daily-search')
 def daily_search():
     games = Game.query.filter_by(active=True).all()
@@ -539,6 +624,8 @@ def daily_search():
             logger.error(f"Daily search failed for {game.name}: {e}")
     db.session.commit()
     return jsonify({'success': True, 'games_searched': len(games), 'new_articles': total})
+
+# ==================== SCHEDULER (BACKUP) ====================
 
 def init_scheduler():
     scheduler = BackgroundScheduler()
