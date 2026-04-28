@@ -108,8 +108,9 @@ def search_gnews(game_name, days_back=1):
         logger.error(f"GNews error for '{game_name}': {e}")
         return []
 
-def search_rss(game_name):
-    """Search custom RSS feeds defined in custom_feeds.json"""
+def search_rss(game_name, max_feeds=None):
+    """Search custom RSS feeds defined in custom_feeds.json with timeout and limit"""
+    import os, json, time as time_module
     json_path = os.path.join(os.path.dirname(__file__), 'custom_feeds.json')
     try:
         with open(json_path, 'r') as f:
@@ -118,12 +119,20 @@ def search_rss(game_name):
         logger.warning("custom_feeds.json not found – no RSS sources loaded")
         return []
 
+    # Limit feeds for manual searches (max_feeds=None means all)
+    if max_feeds and len(feed_list) > max_feeds:
+        import random
+        feed_list = random.sample(feed_list, max_feeds)
+
     articles = []
     for feed_url in feed_list:
         try:
-            feed = feedparser.parse(feed_url)
+            # Fetch with timeout first
+            resp = requests.get(feed_url, timeout=5, headers={'User-Agent': 'GamePRTracker/1.0'})
+            resp.raise_for_status()
+            feed = feedparser.parse(resp.content)
             source_name = feed.feed.get('title', feed_url)
-            for entry in feed.entries[:10]:  # check more entries per feed
+            for entry in feed.entries[:5]:  # only check first 5 entries per feed
                 if game_name.lower() in entry.title.lower():
                     pub_date = None
                     if hasattr(entry, 'published_parsed') and entry.published_parsed:
@@ -141,8 +150,14 @@ def search_rss(game_name):
                         'description': entry.get('summary', '')[:1000],
                         'image_url': ''
                     })
+            # Small delay to be polite to servers
+            time_module.sleep(0.05)
+        except requests.exceptions.Timeout:
+            logger.warning(f"RSS timeout for {feed_url}")
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"RSS error for {feed_url}: {e}")
         except Exception as e:
-            logger.error(f"RSS error for {feed_url}: {e}")
+            logger.warning(f"RSS parse error for {feed_url}: {e}")
 
     return articles
 
@@ -225,7 +240,11 @@ def search_with_dates(game, start_date=None, end_date=None):
             logger.error(f"GNews date search error: {e}")
 
     # RSS feeds (no date filter possible, just take recent)
-    all_articles.extend(search_rss(game.name))
+    # For date-based searches (manual or daily), use more feeds; otherwise limit
+    if start_date or end_date:
+        all_articles.extend(search_rss(game.name, max_feeds=50))  # 50 for manual
+    else:
+        all_articles.extend(search_rss(game.name, max_feeds=20))   # 20 for quick search
 
     # Save to database
     saved_count = 0
