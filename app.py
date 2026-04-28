@@ -118,13 +118,24 @@ def search_rss(game_name):
         ('Polygon', 'https://www.polygon.com/rss/index.xml'),
     ]
     
+  def search_rss(game_name):
+    """Search custom RSS feeds defined in custom_feeds.json"""
+    import os, json
+    json_path = os.path.join(os.path.dirname(__file__), 'custom_feeds.json')
+    try:
+        with open(json_path, 'r') as f:
+            feed_list = json.load(f)
+    except FileNotFoundError:
+        logger.warning("custom_feeds.json not found – no RSS sources loaded")
+        return []
+
     articles = []
-    for source_name, feed_url in feeds:
+    for feed_url in feed_list:
         try:
             feed = feedparser.parse(feed_url)
-            for entry in feed.entries[:5]:
-                title_lower = entry.title.lower()
-                if game_name.lower() in title_lower:
+            source_name = feed.feed.get('title', feed_url)
+            for entry in feed.entries[:10]:  # take more entries per feed
+                if game_name.lower() in entry.title.lower():
                     pub_date = None
                     if hasattr(entry, 'published_parsed') and entry.published_parsed:
                         pub_date = datetime(*entry.published_parsed[:6])
@@ -142,7 +153,7 @@ def search_rss(game_name):
                         'image_url': ''
                     })
         except Exception as e:
-            logger.error(f"RSS error for {source_name}: {e}")
+            logger.error(f"RSS error for {feed_url}: {e}")
     
     return articles
 
