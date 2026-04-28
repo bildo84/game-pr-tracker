@@ -369,10 +369,19 @@ def fetch_all_articles(game, start_date=None, end_date=None):
 # ==================== FALSE-POSITIVE FILTERING ====================
 
 def is_gaming_article(title, description, game_name, qualifiers=None):
-    """Check if article is actually about the game, not a false positive."""
+    """
+    Check if article is actually about the game, not a false positive.
+    Supports AND (+) and OR (,) logic in qualifiers.
+    
+    Examples:
+        "game, xbox, steam"          → matches any one of these (OR)
+        "game + steam"               → must match BOTH (AND)
+        "game, xbox + steam + deck"  → (game OR xbox) AND steam AND deck
+    """
     text = f"{title} {description}".lower()
     game_lower = game_name.lower()
 
+    # Default gaming context words (always checked as OR)
     default_gaming_terms = [
         'game', 'gaming', 'xbox', 'playstation', 'ps5', 'ps4', 'nintendo',
         'switch', 'steam', 'pc game', 'video game', 'dlc', 'update', 'patch',
@@ -380,33 +389,55 @@ def is_gaming_article(title, description, game_name, qualifiers=None):
         'rpg', 'fps', 'indie', 'esports', 'review', 'score', 'deck'
     ]
 
-    all_qualifiers = default_gaming_terms.copy()
+    # Parse custom qualifiers
+    custom_terms = []
     if qualifiers:
         try:
-            custom = json.loads(qualifiers) if isinstance(qualifiers, str) else qualifiers
-            all_qualifiers.extend([q.lower() for q in custom])
+            custom_terms = json.loads(qualifiers) if isinstance(qualifiers, str) else qualifiers
         except:
             pass
 
-    for term in all_qualifiers:
-        if term.lower() in text:
-            return True
-    return False
+    # If no custom qualifiers, just check default terms
+    if not custom_terms:
+        for term in default_gaming_terms:
+            if term.lower() in text:
+                return True
+        return False
 
-def is_gaming_source(source_name, url=''):
-    """Check if the source appears to be a gaming outlet."""
-    gaming_domains = [
-        'ign', 'gamespot', 'pcgamer', 'eurogamer', 'polygon', 'kotaku',
-        'gamesradar', 'rockpapershotgun', 'vg247', 'destructoid', 'nintendolife',
-        'pushsquare', 'trueachievements', 'screenrant', 'gamerant', 'dualshockers',
-        'gematsu', 'rpgamer', 'rpgsite', 'gameinformer', 'toucharcade',
-        'pocketgamer', 'siliconera', 'rpgfan', 'mmorpg', 'shacknews',
-        'venturebeat/games', 'videogameschronicle', 'gamingbolt', 'wccftech',
-        'gamewatcher', 'pcgamesn', 'gamedeveloper', 'gamedaily', 'gaming',
-        'xbox', 'playstation', 'nintendo', 'steam deck'
-    ]
-    check_text = f"{source_name} {url}".lower()
-    return any(domain in check_text for domain in gaming_domains)
+    # Parse qualifier string into AND/OR groups
+    # Split by comma first (OR groups), then by + (AND within groups)
+    or_groups = []
+    current_group = []
+    
+    for term in custom_terms:
+        term = term.strip()
+        if '+' in term:
+            # This is an AND group: "game + steam"
+            and_terms = [t.strip() for t in term.split('+')]
+            or_groups.append({'type': 'AND', 'terms': and_terms})
+        else:
+            current_group.append(term)
+    
+    # Remaining terms are OR
+    if current_group:
+        or_groups.append({'type': 'OR', 'terms': current_group})
+
+    # Also include default terms as an OR group
+    or_groups.append({'type': 'OR', 'terms': default_gaming_terms})
+
+    # Check each group
+    for group in or_groups:
+        if group['type'] == 'AND':
+            # ALL terms must be found
+            if all(term.lower() in text for term in group['terms']):
+                return True
+        else:  # OR
+            # ANY term must be found
+            if any(term.lower() in text for term in group['terms']):
+                return True
+
+    # If no group matched, fail
+    return False
 
 # ==================== SENTIMENT ANALYSIS ====================
 
