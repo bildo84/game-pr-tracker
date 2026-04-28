@@ -447,50 +447,78 @@ def analytics_page(game_id):
 
 @app.route('/export/<int:game_id>')
 def export_csv(game_id):
+    """Export articles to CSV (more memory-efficient than Excel on free tier)"""
     game = Game.query.get_or_404(game_id)
-    articles = Article.query.filter_by(game_id=game_id).order_by(Article.published_at.desc()).all()
-    data = [{
-        'Date': a.published_at.strftime('%Y-%m-%d') if a.published_at else '',
-        'Title': a.title,
-        'Source': a.source_name,
-        'URL': a.url,
-        'Sentiment': a.sentiment_label,
-        'Sentiment Score': round(a.sentiment_score, 2) if a.sentiment_score else 0,
-        'Relevance Score': round(a.relevance_score, 2) if a.relevance_score else 0
-    } for a in articles]
-    df = pd.DataFrame(data)
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, sheet_name='Articles', index=False)
-    output.seek(0)
-    return send_file(output, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                    as_attachment=True, download_name=f'{game.name}_PR_Report.xlsx')
+    try:
+        articles = Article.query.filter_by(game_id=game_id).order_by(
+            Article.published_at.desc()
+        ).all()
+
+        # Build CSV in memory as string
+        import csv
+        output = BytesIO()
+        writer = csv.writer(output)
+        writer.writerow(['Date', 'Title', 'Source', 'URL', 'Sentiment', 'Sentiment Score', 'Relevance Score'])
+        for a in articles:
+            writer.writerow([
+                a.published_at.strftime('%Y-%m-%d') if a.published_at else '',
+                a.title,
+                a.source_name or 'Unknown',
+                a.url,
+                a.sentiment_label or 'neutral',
+                round(a.sentiment_score, 2) if a.sentiment_score else 0,
+                round(a.relevance_score, 2) if a.relevance_score else 0
+            ])
+        output.seek(0)
+        return send_file(
+            output,
+            mimetype='text/csv',
+            as_attachment=True,
+            download_name=f'{game.name}_PR_Report_{datetime.now().strftime("%Y%m%d")}.csv'
+        )
+    except Exception as e:
+        logger.error(f"Export error for game {game_id}: {e}")
+        return jsonify({'error': 'Export failed, please try again'}), 500
 
 @app.route('/api/weekly-report')
 def weekly_report():
-    week_ago = datetime.now() - timedelta(days=7)
-    games = Game.query.filter_by(active=True).all()
-    report_data = []
-    for game in games:
-        articles = Article.query.filter(Article.game_id == game.id,
-                                        Article.published_at >= week_ago).all()
-        if articles:
-            report_data.append({
-                'Game': game.name,
-                'Total Articles': len(articles),
-                'Positive': sum(1 for a in articles if a.sentiment_label == 'positive'),
-                'Negative': sum(1 for a in articles if a.sentiment_label == 'negative'),
-                'Neutral': sum(1 for a in articles if a.sentiment_label == 'neutral'),
-                'Avg Sentiment': round(sum(a.sentiment_score for a in articles) / len(articles), 2),
-                'Top Sources': ', '.join(set(a.source_name for a in articles)[:3])
-            })
-    df = pd.DataFrame(report_data)
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, sheet_name='Weekly Report', index=False)
-    output.seek(0)
-    return send_file(output, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                    as_attachment=True, download_name=f'Weekly_PR_Report_{datetime.now().strftime("%Y%m%d")}.xlsx')
+    try:
+        week_ago = datetime.now() - timedelta(days=7)
+        games = Game.query.filter_by(active=True).all()
+        if not games:
+            return jsonify({'error': 'No games found'}), 404
+
+        import csv
+        output = BytesIO()
+        writer = csv.writer(output)
+        writer.writerow(['Game', 'Total Articles', 'Positive', 'Negative', 'Neutral', 'Avg Sentiment', 'Top Sources'])
+        for game in games:
+            articles = Article.query.filter(
+                Article.game_id == game.id,
+                Article.published_at >= week_ago
+            ).all()
+            if articles:
+                writer.writerow([
+                    game.name,
+                    len(articles),
+                    sum(1 for a in articles if a.sentiment_label == 'positive'),
+                    sum(1 for a in articles if a.sentiment_label == 'negative'),
+                    sum(1 for a in articles if a.sentiment_label == 'neutral'),
+                    round(sum(a.sentiment_score for a in articles) / len(articles), 2) if articles else 0,
+                    ', '.join(set(a.source_name for a in articles)[:3])
+                ])
+        output.seek(0)
+        return send_file(
+            output,
+            mimetype='text/csv',
+            as_attachment=True,
+            download_name=f'Weekly_PR_Report_{datetime.now().strftime("%Y%m%d")}.csv'
+        )
+    except Exception as e:
+        logger.error(f"Weekly report error: {e}")
+        return jsonify({'error': 'Report generation failed'}), 500
+
+
 
 @app.route('/ping')
 def ping():
