@@ -35,13 +35,13 @@ class Game(db.Model):
     active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     last_searched = db.Column(db.DateTime)
-    
+
     articles = db.relationship('Article', backref='game', lazy='dynamic', cascade='all, delete-orphan')
-    
+
     @property
     def article_count(self):
         return self.articles.count()
-    
+
     @property
     def recent_articles(self):
         week_ago = datetime.now() - timedelta(days=7)
@@ -60,7 +60,7 @@ class Article(db.Model):
     sentiment_label = db.Column(db.String(20))
     relevance_score = db.Column(db.Float)
     found_at = db.Column(db.DateTime, default=datetime.utcnow)
-    
+
     __table_args__ = (
         db.UniqueConstraint('game_id', 'url', name='unique_game_article'),
     )
@@ -77,21 +77,21 @@ def search_gnews(game_name, days_back=1):
     if not api_key:
         logger.warning("No GNEWS_API_KEY set")
         return []
-    
+
     try:
         url = "https://gnews.io/api/v4/search"
-           params = {
-            'q': f'{game_name}',   # no forced quotes, just the game name
+        params = {
+            'q': game_name,  # broader query without forced quotes
             'lang': 'en',
-            'max': 100,            # fetch more
+            'max': 100,
             'from': (datetime.now() - timedelta(days=days_back)).strftime('%Y-%m-%dT%H:%M:%SZ'),
             'apikey': api_key,
-            'sort': 'relevance'    # get most relevant first
+            'sort': 'relevance'
         }
-        
+
         response = requests.get(url, params=params, timeout=10)
         response.raise_for_status()
-        
+
         articles = []
         for item in response.json().get('articles', []):
             articles.append({
@@ -102,26 +102,14 @@ def search_gnews(game_name, days_back=1):
                 'description': item.get('description', ''),
                 'image_url': item.get('image', '')
             })
-        
+
         return articles
     except Exception as e:
         logger.error(f"GNews error for '{game_name}': {e}")
         return []
 
 def search_rss(game_name):
-    """Search gaming RSS feeds"""
-    feeds = [
-        ('PC Gamer', 'https://www.pcgamer.com/rss/'),
-        ('GameSpot', 'https://www.gamespot.com/feeds/news/'),
-        ('IGN', 'https://www.ign.com/rss/articles'),
-        ('Kotaku', 'https://kotaku.com/rss'),
-        ('Eurogamer', 'https://www.eurogamer.net/feed'),
-        ('Polygon', 'https://www.polygon.com/rss/index.xml'),
-    ]
-    
-  def search_rss(game_name):
     """Search custom RSS feeds defined in custom_feeds.json"""
-    import os, json
     json_path = os.path.join(os.path.dirname(__file__), 'custom_feeds.json')
     try:
         with open(json_path, 'r') as f:
@@ -135,7 +123,7 @@ def search_rss(game_name):
         try:
             feed = feedparser.parse(feed_url)
             source_name = feed.feed.get('title', feed_url)
-            for entry in feed.entries[:10]:  # take more entries per feed
+            for entry in feed.entries[:10]:  # check more entries per feed
                 if game_name.lower() in entry.title.lower():
                     pub_date = None
                     if hasattr(entry, 'published_parsed') and entry.published_parsed:
@@ -144,7 +132,7 @@ def search_rss(game_name):
                         pub_date = datetime(*entry.updated_parsed[:6])
                     else:
                         pub_date = datetime.now()
-                    
+
                     articles.append({
                         'title': entry.title,
                         'url': entry.link,
@@ -155,7 +143,7 @@ def search_rss(game_name):
                     })
         except Exception as e:
             logger.error(f"RSS error for {feed_url}: {e}")
-    
+
     return articles
 
 def analyze_sentiment(text):
@@ -163,14 +151,14 @@ def analyze_sentiment(text):
     try:
         blob = TextBlob(text[:1000])
         score = blob.sentiment.polarity
-        
+
         if score > 0.1:
             label = 'positive'
         elif score < -0.1:
             label = 'negative'
         else:
             label = 'neutral'
-        
+
         return score, label
     except:
         return 0, 'neutral'
@@ -179,53 +167,82 @@ def calculate_relevance(title, description, game_name):
     """Simple relevance scoring"""
     text = f"{title} {description}".lower()
     game_lower = game_name.lower()
-    
+
     score = 0.3  # Base score
-    
+
     # Title contains game name
     if game_lower in title.lower():
         score += 0.4
-    
+
     # Multiple mentions
     count = text.count(game_lower)
     score += min(count * 0.1, 0.3)
-    
+
     return min(score, 1.0)
 
-def search_and_save_articles(game):
-    """Search for articles and save them to database"""
+def search_with_dates(game, start_date=None, end_date=None):
+    """Search within a specific date range, also respects keywords"""
     all_articles = []
-    all_articles.extend(search_gnews(game.name))
+
+    # GNews with custom dates
+    api_key = os.getenv('GNEWS_API_KEY', '')
+    if api_key:
+        try:
+            url = "https://gnews.io/api/v4/search"
+            # search for game name + first keyword if available
+            query = game.name
+            try:
+                keywords = json.loads(game.keywords) if game.keywords else []
+                if keywords:
+                    query = f"{game.name} {keywords[0]}"
+            except:
+                pass
+
+            params = {
+                'q': query,
+                'lang': 'en',
+                'max': 100,
+                'apikey': api_key,
+                'sort': 'relevance'
+            }
+            if start_date:
+                params['from'] = start_date.strftime('%Y-%m-%dT%H:%M:%SZ')
+            if end_date:
+                params['to'] = end_date.strftime('%Y-%m-%dT%H:%M:%SZ')
+
+            response = requests.get(url, params=params, timeout=10)
+            if response.ok:
+                for item in response.json().get('articles', []):
+                    all_articles.append({
+                        'title': item['title'],
+                        'url': item['url'],
+                        'source_name': item['source']['name'],
+                        'published_at': datetime.strptime(item['publishedAt'][:19], '%Y-%m-%dT%H:%M:%S'),
+                        'description': item.get('description', ''),
+                        'image_url': item.get('image', '')
+                    })
+        except Exception as e:
+            logger.error(f"GNews date search error: {e}")
+
+    # RSS feeds (no date filter possible, just take recent)
     all_articles.extend(search_rss(game.name))
-    
-    # Also search with keywords
-    try:
-        keywords = json.loads(game.keywords) if game.keywords else []
-        for keyword in keywords[:3]:
-            all_articles.extend(search_gnews(f"{game.name} {keyword}"))
-    except:
-        pass
-    
+
+    # Save to database
     saved_count = 0
     for article_data in all_articles:
-        # Check for duplicate
         existing = Article.query.filter_by(
             game_id=game.id,
             url=article_data['url']
         ).first()
-        
         if not existing:
-            # Analyze sentiment
-            text = f"{article_data.get('title', '')} {article_data.get('description', '')}"
-            sentiment_score, sentiment_label = analyze_sentiment(text)
-            
-            # Calculate relevance
+            sentiment_score, sentiment_label = analyze_sentiment(
+                f"{article_data.get('title', '')} {article_data.get('description', '')}"
+            )
             relevance = calculate_relevance(
                 article_data.get('title', ''),
                 article_data.get('description', ''),
                 game.name
             )
-            
             article = Article(
                 game_id=game.id,
                 title=article_data['title'][:500],
@@ -238,13 +255,10 @@ def search_and_save_articles(game):
                 sentiment_label=sentiment_label,
                 relevance_score=relevance
             )
-            
             db.session.add(article)
             saved_count += 1
-    
-    game.last_searched = datetime.utcnow()
+
     db.session.commit()
-    
     return saved_count
 
 # ==================== ROUTES ====================
@@ -254,14 +268,14 @@ def dashboard():
     """Main dashboard"""
     games = Game.query.filter_by(active=True).all()
     total_articles = Article.query.count()
-    
+
     week_ago = datetime.now() - timedelta(days=7)
     weekly_articles = Article.query.filter(Article.published_at >= week_ago).count()
-    
+
     recent_articles = Article.query.order_by(
         Article.published_at.desc()
     ).limit(20).all()
-    
+
     # Top games by coverage
     game_stats = []
     for game in games:
@@ -270,7 +284,7 @@ def dashboard():
             'total': game.article_count,
             'recent': game.recent_articles
         })
-    
+
     return render_template('dashboard.html',
                          games=games,
                          total_articles=total_articles,
@@ -291,34 +305,36 @@ def add_game():
     publisher = request.form.get('publisher', '').strip()
     platforms = request.form.get('platforms', '').strip()
     keywords_str = request.form.get('keywords', '').strip()
-    
+
     if not name:
         return redirect(url_for('games_page'))
-    
+
     # Parse keywords
     keywords = []
     if keywords_str:
         keywords = [k.strip() for k in keywords_str.split(',') if k.strip()]
-    
+
     # Check for duplicates
     existing = Game.query.filter_by(name=name).first()
     if existing:
         return redirect(url_for('games_page'))
-    
+
     game = Game(
         name=name,
         publisher=publisher,
         platforms=platforms,
         keywords=json.dumps(keywords)
     )
-    
+
     db.session.add(game)
     db.session.commit()
-    
+
     # Immediately search for this game
-    count = search_and_save_articles(game)
+    count = search_with_dates(game)
+    game.last_searched = datetime.utcnow()
+    db.session.commit()
     logger.info(f"Added game '{name}' with {count} initial articles")
-    
+
     return redirect(url_for('games_page'))
 
 @app.route('/toggle-game/<int:game_id>', methods=['POST'])
@@ -327,32 +343,25 @@ def toggle_game(game_id):
     game = Game.query.get_or_404(game_id)
     game.active = not game.active
     db.session.commit()
-    
-    status = "activated" if game.active else "deactivated"
-    logger.info(f"Game '{game.name}' {status}")
-    
     return redirect(url_for('games_page'))
 
 @app.route('/delete-game/<int:game_id>', methods=['POST'])
 def delete_game(game_id):
     """Delete a game and all its articles"""
     game = Game.query.get_or_404(game_id)
-    game_name = game.name
-    
     db.session.delete(game)
     db.session.commit()
-    
-    logger.info(f"Deleted game '{game_name}'")
     return redirect(url_for('games_page'))
 
 @app.route('/search/<int:game_id>')
 def search_game_now(game_id):
+    """Search for articles about a specific game with optional date filters"""
     game = Game.query.get_or_404(game_id)
-    
+
     # Read optional date params
     start_str = request.args.get('start_date')
     end_str = request.args.get('end_date')
-    
+
     start_date = None
     end_date = None
     if start_str:
@@ -362,15 +371,14 @@ def search_game_now(game_id):
             pass
     if end_str:
         try:
-            # Add 1 day so the search includes all of the end date
             end_date = datetime.strptime(end_str, '%Y-%m-%d') + timedelta(days=1)
         except ValueError:
             pass
-    
+
     count = search_with_dates(game, start_date, end_date)
     game.last_searched = datetime.utcnow()
     db.session.commit()
-    
+
     logger.info(f"Manual search for '{game.name}': found {count} new articles")
     return redirect(url_for('articles_page', game_id=game_id))
 
@@ -379,10 +387,11 @@ def search_all_games():
     """Search for all active games"""
     games = Game.query.filter_by(active=True).all()
     results = []
-    
+
     for game in games:
         try:
-            count = search_and_save_articles(game)
+            count = search_with_dates(game)
+            game.last_searched = datetime.utcnow()
             results.append({
                 'game': game.name,
                 'articles_found': count,
@@ -395,7 +404,8 @@ def search_all_games():
                 'articles_found': 0,
                 'status': 'error'
             })
-    
+
+    db.session.commit()
     return jsonify({'success': True, 'results': results})
 
 @app.route('/articles')
@@ -405,31 +415,31 @@ def articles_page():
     sentiment = request.args.get('sentiment', '')
     source = request.args.get('source', '')
     page = request.args.get('page', 1, type=int)
-    
+
     query = Article.query
-    
+
     if game_id:
         query = query.filter_by(game_id=game_id)
         selected_game = Game.query.get(game_id)
     else:
         selected_game = None
-    
+
     if sentiment:
         query = query.filter_by(sentiment_label=sentiment)
-    
+
     if source:
         query = query.filter(Article.source_name.contains(source))
-    
+
     articles_paginated = query.order_by(
         Article.published_at.desc()
     ).paginate(page=page, per_page=25)
-    
+
     all_games = Game.query.all()
-    
+
     # Get unique sources for filter
     sources = db.session.query(Article.source_name).distinct().order_by(Article.source_name).all()
     sources = [s[0] for s in sources if s[0]]
-    
+
     return render_template('articles.html',
                          articles=articles_paginated,
                          games=all_games,
@@ -443,22 +453,22 @@ def analytics_page(game_id):
     """View analytics for a game"""
     game = Game.query.get_or_404(game_id)
     days = request.args.get('days', 30, type=int)
-    
+
     since_date = datetime.now() - timedelta(days=days)
     articles = Article.query.filter(
         Article.game_id == game_id,
         Article.published_at >= since_date
     ).order_by(Article.published_at.desc()).all()
-    
+
     # Sentiment breakdown
     sentiment_counts = {
         'positive': sum(1 for a in articles if a.sentiment_label == 'positive'),
         'negative': sum(1 for a in articles if a.sentiment_label == 'negative'),
         'neutral': sum(1 for a in articles if a.sentiment_label == 'neutral')
     }
-    
+
     avg_sentiment = sum(a.sentiment_score for a in articles) / len(articles) if articles else 0
-    
+
     # Daily breakdown for chart
     daily_data = {}
     for article in articles:
@@ -468,18 +478,18 @@ def analytics_page(game_id):
                 daily_data[date_key] = {'total': 0, 'positive': 0, 'negative': 0, 'neutral': 0}
             daily_data[date_key]['total'] += 1
             daily_data[date_key][article.sentiment_label] += 1
-    
+
     # Source breakdown
     source_counts = {}
     for article in articles:
         source = article.source_name or 'Unknown'
         source_counts[source] = source_counts.get(source, 0) + 1
-    
+
     top_sources = sorted(source_counts.items(), key=lambda x: x[1], reverse=True)[:10]
-    
+
     # Top articles by relevance
     top_articles = sorted(articles, key=lambda x: x.relevance_score or 0, reverse=True)[:10]
-    
+
     return render_template('analytics.html',
                          game=game,
                          articles=articles,
@@ -494,11 +504,11 @@ def analytics_page(game_id):
 def export_csv(game_id):
     """Export articles to Excel"""
     game = Game.query.get_or_404(game_id)
-    
+
     articles = Article.query.filter_by(game_id=game_id).order_by(
         Article.published_at.desc()
     ).all()
-    
+
     data = []
     for article in articles:
         data.append({
@@ -510,14 +520,14 @@ def export_csv(game_id):
             'Sentiment Score': round(article.sentiment_score, 2) if article.sentiment_score else 0,
             'Relevance Score': round(article.relevance_score, 2) if article.relevance_score else 0
         })
-    
+
     df = pd.DataFrame(data)
-    
+
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, sheet_name='Articles', index=False)
     output.seek(0)
-    
+
     return send_file(
         output,
         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -529,16 +539,16 @@ def export_csv(game_id):
 def weekly_report():
     """Generate weekly PR report for all games"""
     week_ago = datetime.now() - timedelta(days=7)
-    
+
     games = Game.query.filter_by(active=True).all()
-    
+
     report_data = []
     for game in games:
         articles = Article.query.filter(
             Article.game_id == game.id,
             Article.published_at >= week_ago
         ).all()
-        
+
         if articles:
             report_data.append({
                 'Game': game.name,
@@ -549,14 +559,14 @@ def weekly_report():
                 'Avg Sentiment': round(sum(a.sentiment_score for a in articles) / len(articles), 2),
                 'Top Sources': ', '.join(set(a.source_name for a in articles)[:3])
             })
-    
+
     df = pd.DataFrame(report_data)
-    
+
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, sheet_name='Weekly Report', index=False)
     output.seek(0)
-    
+
     return send_file(
         output,
         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -575,15 +585,17 @@ def daily_search():
     """Trigger daily search for all active games"""
     games = Game.query.filter_by(active=True).all()
     total_articles = 0
-    
+
     for game in games:
         try:
-            count = search_and_save_articles(game)
+            count = search_with_dates(game)
+            game.last_searched = datetime.utcnow()
             total_articles += count
             logger.info(f"Daily search: {count} new articles for {game.name}")
         except Exception as e:
             logger.error(f"Daily search failed for {game.name}: {e}")
-    
+
+    db.session.commit()
     return jsonify({
         'success': True,
         'games_searched': len(games),
@@ -596,102 +608,28 @@ def daily_search():
 def init_scheduler():
     """Initialize APScheduler as backup (primary will be cron-job.org)"""
     scheduler = BackgroundScheduler()
-    
+
     def scheduled_daily_search():
         with app.app_context():
-            logger.info("Running scheduled daily search")
+            logger.info("Running scheduled daily search (APScheduler)")
             games = Game.query.filter_by(active=True).all()
             for game in games:
                 try:
-                    search_and_save_articles(game)
+                    search_with_dates(game)
+                    game.last_searched = datetime.utcnow()
                 except Exception as e:
                     logger.error(f"Scheduled search failed for {game.name}: {e}")
-    
-    # Run at 6 AM daily as backup
+            db.session.commit()
+
     scheduler.add_job(scheduled_daily_search, 'cron', hour=6, minute=0)
     scheduler.start()
-    
-    # Shut down scheduler when app stops
+
     atexit.register(lambda: scheduler.shutdown())
-    
     return scheduler
 
-# Initialize scheduler
 with app.app_context():
     scheduler = init_scheduler()
     logger.info("Application started with scheduler")
 
 if __name__ == '__main__':
     app.run(debug=True)
-
-def search_with_dates(game, start_date=None, end_date=None):
-    """Search within a specific date range"""
-    all_articles = []
-    
-    # Use 1 day as default if no dates given
-    if not start_date and not end_date:
-        days_back = 1
-    elif start_date and end_date:
-        days_back = (datetime.now() - start_date).days + 1
-    else:
-        days_back = 1
-    
-    # GNews with custom dates
-    api_key = os.getenv('GNEWS_API_KEY', '')
-    if api_key:
-        try:
-            url = "https://gnews.io/api/v4/search"
-            params = {
-                'q': f'"{game.name}" video game',
-                'lang': 'en',
-                'max': 50,
-                'apikey': api_key,
-                'sort': 'publishedAt'
-            }
-            if start_date:
-                params['from'] = start_date.strftime('%Y-%m-%dT%H:%M:%SZ')
-            if end_date:
-                params['to'] = end_date.strftime('%Y-%m-%dT%H:%M:%SZ')
-            
-            response = requests.get(url, params=params, timeout=10)
-            if response.ok:
-                for item in response.json().get('articles', []):
-                    all_articles.append({
-                        'title': item['title'],
-                        'url': item['url'],
-                        'source_name': item['source']['name'],
-                        'published_at': datetime.strptime(item['publishedAt'][:19], '%Y-%m-%dT%H:%M:%S'),
-                        'description': item.get('description', ''),
-                        'image_url': item.get('image', '')
-                    })
-        except Exception as e:
-            logger.error(f"GNews date search error: {e}")
-    
-    # RSS feeds (no date filter possible, just take recent)
-    all_articles.extend(search_rss(game.name))
-    
-    # Save to database
-    saved_count = 0
-    for article_data in all_articles:
-        existing = Article.query.filter_by(game_id=game.id, url=article_data['url']).first()
-        if not existing:
-            sentiment_score, sentiment_label = analyze_sentiment(
-                f"{article_data.get('title', '')} {article_data.get('description', '')}"
-            )
-            article = Article(
-                game_id=game.id,
-                title=article_data['title'][:500],
-                url=article_data['url'][:1000],
-                source_name=article_data.get('source_name', 'Unknown')[:200],
-                published_at=article_data.get('published_at', datetime.now()),
-                description=article_data.get('description', ''),
-                image_url=article_data.get('image_url', '')[:1000],
-                sentiment_score=sentiment_score,
-                sentiment_label=sentiment_label,
-                relevance_score=0.8
-            )
-            db.session.add(article)
-            saved_count += 1
-    
-    db.session.commit()
-    return saved_count
