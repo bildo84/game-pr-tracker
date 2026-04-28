@@ -1,0 +1,10 @@
+game-pr-tracker/
+├── app.py
+├── requirements.txt
+├── render.yaml
+├── templates/
+│   ├── base.html
+│   ├── dashboard.html
+│   ├── games.html
+│   ├── articles.html
+│   └── analytics.html

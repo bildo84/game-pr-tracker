@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: game-pr-tracker
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --timeout 120
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: GNEWS_API_KEY
+        sync: false
+      - key: PYTHON_VERSION
+        value: 3.11.0
