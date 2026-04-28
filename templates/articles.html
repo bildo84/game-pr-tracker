@@ -48,9 +48,11 @@
     <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100 hover:shadow-md transition">
         <div class="flex justify-between items-start">
             <div class="flex-1">
-                <a href="{{ article.url }}" target="_blank" class="text-lg text-blue-600 hover:text-blue-800 font-semibold">
-                    {{ article.title }}
-                </a>
+               <a href="{{ article.url }}" target="_blank" 
+   class="text-lg text-blue-600 hover:text-blue-800 font-semibold block break-all"
+   style="word-break: break-all; overflow-wrap: anywhere;">
+    {{ article.title[:120] }}{% if article.title|length > 120 %}...{% endif %}
+</a>
                 
                 {% if article.description %}
                 <p class="text-gray-600 mt-2 text-sm">{{ article.description[:200] }}{% if article.description|length > 200 %}...{% endif %}</p>
