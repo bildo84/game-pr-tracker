@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Game PR Tracker{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .sentiment-positive { background-color: #dcfce7; color: #166534; }
+        .sentiment-negative { background-color: #fee2e2; color: #991b1b; }
+        .sentiment-neutral { background-color: #f3f4f6; color: #374151; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <nav class="bg-gradient-to-r from-gray-900 to-gray-800 text-white shadow-lg">
+        <div class="max-w-7xl mx-auto px-4">
+            <div class="flex justify-between h-16">
+                <div class="flex space-x-8">
+                    <a href="/" class="flex items-center space-x-2 px-3 py-2 font-bold text-xl">
+                        <span>🎮</span>
+                        <span>Game PR Tracker</span>
+                    </a>
+                    <div class="hidden md:flex space-x-4">
+                        <a href="/" class="inline-flex items-center px-3 py-2 text-sm font-medium rounded-md hover:bg-gray-700 transition">
+                            📊 Dashboard
+                        </a>
+                        <a href="/games" class="inline-flex items-center px-3 py-2 text-sm font-medium rounded-md hover:bg-gray-700 transition">
+                            🎯 Games
+                        </a>
+                        <a href="/articles" class="inline-flex items-center px-3 py-2 text-sm font-medium rounded-md hover:bg-gray-700 transition">
+                            📰 Articles
+                        </a>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <a href="/api/weekly-report" class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg text-sm font-medium transition">
+                        📥 Weekly Report
+                    </a>
+                    <button onclick="searchAll()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg text-sm font-medium transition">
+                        🔍 Search All
+                    </button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <main class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="bg-white border-t mt-12">
+        <div class="max-w-7xl mx-auto py-6 px-4 text-center text-gray-500 text-sm">
+            Game PR Tracker - Personal Coverage Monitoring Tool
+        </div>
+    </footer>
+
+    <script>
+        function searchAll() {
+            const button = event.target;
+            button.disabled = true;
+            button.textContent = 'Searching...';
+            
+            fetch('/search-all')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        const total = data.results.reduce((sum, r) => sum + r.articles_found, 0);
+                        alert(`✅ Search complete!\nFound ${total} new articles across ${data.results.length} games.`);
+                        location.reload();
+                    }
+                })
+                .catch(error => {
+                    alert('Search failed. Please try again.');
+                })
+                .finally(() => {
+                    button.disabled = false;
+                    button.textContent = '🔍 Search All';
+                });
+        }
+    </script>
+</body>
+</html>
