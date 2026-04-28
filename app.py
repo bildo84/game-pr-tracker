@@ -80,12 +80,13 @@ def search_gnews(game_name, days_back=1):
     
     try:
         url = "https://gnews.io/api/v4/search"
-        params = {
-            'q': f'"{game_name}" video game',
+           params = {
+            'q': f'{game_name}',   # no forced quotes, just the game name
             'lang': 'en',
-            'max': 10,
+            'max': 100,            # fetch more
             'from': (datetime.now() - timedelta(days=days_back)).strftime('%Y-%m-%dT%H:%M:%SZ'),
-            'apikey': api_key
+            'apikey': api_key,
+            'sort': 'relevance'    # get most relevant first
         }
         
         response = requests.get(url, params=params, timeout=10)
