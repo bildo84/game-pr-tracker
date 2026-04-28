@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block title %}Articles - Game PR Tracker{% endblock %}
+{% block content %}
+
+<div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-6">
+    <h1 class="text-2xl font-bold text-gray-900">Articles</h1>
+    
+    <!-- Filters -->
+    <div class="flex flex-wrap gap-3">
+        <select onchange="updateFilter('game_id', this.value)" 
+                class="border border-gray-300 rounded-lg px-4 py-2 text-sm">
+            <option value="">All Games</option>
+            {% for game in games %}
+            <option value="{{ game.id }}" {% if selected_game and selected_game.id == game.id %}selected{% endif %}>
+                {{ game.name }}
+            </option>
+            {% endfor %}
+        </select>
+        
+        <select onchange="updateFilter('sentiment', this.value)" 
+                class="border border-gray-300 rounded-lg px-4 py-2 text-sm">
+            <option value="">All Sentiments</option>
+            <option value="positive" {% if selected_sentiment == 'positive' %}selected{% endif %}>😊 Positive</option>
+            <option value="negative" {% if selected_sentiment == 'negative' %}selected{% endif %}>😞 Negative</option>
+            <option value="neutral" {% if selected_sentiment == 'neutral' %}selected{% endif %}>😐 Neutral</option>
+        </select>
+        
+        <select onchange="updateFilter('source', this.value)" 
+                class="border border-gray-300 rounded-lg px-4 py-2 text-sm">
+            <option value="">All Sources</option>
+            {% for source in sources %}
+            <option value="{{ source }}" {% if selected_source == source %}selected{% endif %}>{{ source }}</option>
+            {% endfor %}
+        </select>
+        
+        {% if selected_game %}
+        <a href="/export/{{ selected_game.id }}" 
+           class="inline-flex items-center bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition">
+            📥 Export Excel
+        </a>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Articles List -->
+<div class="space-y-4">
+    {% for article in articles.items %}
+    <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100 hover:shadow-md transition">
+        <div class="flex justify-between items-start">
+            <div class="flex-1">
+                <a href="{{ article.url }}" target="_blank" class="text-lg text-blue-600 hover:text-blue-800 font-semibold">
+                    {{ article.title }}
+                </a>
+                
+                {% if article.description %}
+                <p class="text-gray-600 mt-2 text-sm">{{ article.description[:200] }}{% if article.description|length > 200 %}...{% endif %}</p>
+                {% endif %}
+                
+                <div class="flex flex-wrap items-center gap-x-4 gap-y-2 mt-3 text-sm">
+                    <span class="text-gray-700 font-medium">🎮 {{ article.game.name }}</span>
+                    <span class="text-gray-500">📰 {{ article.source_name }}</span>
+                    <span class="text-gray-500">📅 {{ article.published_at.strftime('%b %d, %Y %H:%M') if article.published_at else 'Unknown date' }}</span>
+                    
+                    <span class="px-2 py-0.5 rounded-full text-xs font-medium 
+                        {% if article.sentiment_label == 'positive' %}sentiment-positive
+                        {% elif article.sentiment_label == 'negative' %}sentiment-negative
+                        {% else %}sentiment-neutral{% endif %}">
+                        {{ article.sentiment_label }}
+                        {% if article.sentiment_score %}
+                        ({{ "%.1f"|format(article.sentiment_score) }})
+                        {% endif %}
+                    </span>
+                    
+                    {% if article.relevance_score %}
+                    <span class="text-gray-400 text-xs">
+                        Relevance: {{ "%.0f"|format(article.relevance_score * 100) }}%
+                    </span>
+                    {% endif %}
+                </div>
+            </div>
+            
+            {% if article.image_url %}
+            <img src="{{ article.image_url }}" alt="" class="w-24 h-24 object-cover rounded-lg ml-4 flex-shrink-0">
+            {% endif %}
+        </div>
+    </div>
+    {% else %}
+    <div class="bg-white rounded-xl shadow-sm p-12 text-center border border-gray-100">
+        <p class="text-6xl mb-4">🔍</p>
+        <p class="text-xl text-gray-700 font-medium">No articles found</p>
+        <p class="text-gray-500 mt-2">Try adjusting your filters or search for new articles.</p>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- Pagination -->
+{% if articles.pages > 1 %}
+<div class="flex justify-center mt-8">
+    <nav class="flex space-x-2">
+        {% if articles.has_prev %}
+        <a href="?page={{ articles.prev_num }}{% if selected_game %}&game_id={{ selected_game.id }}{% endif %}{% if selected_sentiment %}&sentiment={{ selected_sentiment }}{% endif %}" 
+           class="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition">
+            ← Previous
+        </a>
+        {% endif %}
+        
+        {% for page_num in articles.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+            {% if page_num %}
+                <a href="?page={{ page_num }}{% if selected_game %}&game_id={{ selected_game.id }}{% endif %}{% if selected_sentiment %}&sentiment={{ selected_sentiment }}{% endif %}"
+                   class="px-4 py-2 border rounded-lg transition {% if page_num == articles.page %}bg-blue-600 text-white border-blue-600{% else %}border-gray-300 hover:bg-gray-50{% endif %}">
+                    {{ page_num }}
+                </a>
+            {% else %}
+                <span class="px-2 py-2">...</span>
+            {% endif %}
+        {% endfor %}
+        
+        {% if articles.has_next %}
+        <a href="?page={{ articles.next_num }}{% if selected_game %}&game_id={{ selected_game.id }}{% endif %}{% if selected_sentiment %}&sentiment={{ selected_sentiment }}{% endif %}"
+           class="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition">
+            Next →
+        </a>
+        {% endif %}
+    </nav>
+</div>
+{% endif %}
+
+<script>
+function updateFilter(param, value) {
+    const url = new URL(window.location);
+    if (value) {
+        url.searchParams.set(param, value);
+    } else {
+        url.searchParams.delete(param);
+    }
+    url.searchParams.delete('page'); // Reset page when filtering
+    window.location = url.toString();
+}
+</script>
+
+{% endblock %}
