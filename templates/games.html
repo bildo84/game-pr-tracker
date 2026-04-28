@@ -54,8 +54,8 @@
 </div>
 
 <!-- Games List -->
-<div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-    <table class="w-full">
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-x-auto">
+    <table class="w-full min-w-[900px]">
         <thead class="bg-gray-50">
             <tr>
                 <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Game</th>
@@ -89,21 +89,40 @@
                 <td class="px-6 py-4 text-sm text-gray-500">
                     {{ game.last_searched.strftime('%b %d, %Y') if game.last_searched else 'Never' }}
                 </td>
-                <td class="px-6 py-4 text-right space-x-2">
-                    <a href="/search/{{ game.id }}" class="text-blue-600 hover:text-blue-800 text-sm font-medium">🔍 Search</a>
-                    <a href="/analytics/{{ game.id }}" class="text-purple-600 hover:text-purple-800 text-sm font-medium">📊 Analytics</a>
-                    <a href="/export/{{ game.id }}" class="text-green-600 hover:text-green-800 text-sm font-medium">📥 Export</a>
-                    
-                    <form action="/toggle-game/{{ game.id }}" method="POST" class="inline">
-                        <button type="submit" class="text-yellow-600 hover:text-yellow-800 text-sm font-medium">
-                            {{ '⏸ Pause' if game.active else '▶️ Resume' }}
-                        </button>
-                    </form>
-                    
-                    <form action="/delete-game/{{ game.id }}" method="POST" class="inline" 
-                          onsubmit="return confirm('Delete {{ game.name }} and all its articles? This cannot be undone.')">
-                        <button type="submit" class="text-red-600 hover:text-red-800 text-sm font-medium">🗑 Delete</button>
-                    </form>
+                <td class="px-6 py-4 text-right">
+                    <div class="flex items-center justify-end space-x-2" style="min-width: 340px;">
+                        <!-- Date range search form per game -->
+                        <form action="/search/{{ game.id }}" method="GET" class="flex items-center space-x-1">
+                            <input type="date" name="start_date" 
+                                   class="border border-gray-300 rounded px-2 py-1 text-xs w-28 focus:ring-1 focus:ring-blue-500 focus:border-blue-500">
+                            <span class="text-xs text-gray-400">–</span>
+                            <input type="date" name="end_date" 
+                                   class="border border-gray-300 rounded px-2 py-1 text-xs w-28 focus:ring-1 focus:ring-blue-500 focus:border-blue-500">
+                            <button type="submit" title="Search this date range"
+                                    class="text-blue-600 hover:text-blue-800 text-sm font-medium ml-1">
+                                🔍
+                            </button>
+                        </form>
+                        <!-- Analytics -->
+                        <a href="/analytics/{{ game.id }}" title="Analytics"
+                           class="text-purple-600 hover:text-purple-800 text-sm font-medium">📊</a>
+                        <!-- Export -->
+                        <a href="/export/{{ game.id }}" title="Export report"
+                           class="text-green-600 hover:text-green-800 text-sm font-medium">📥</a>
+                        <!-- Toggle active/inactive -->
+                        <form action="/toggle-game/{{ game.id }}" method="POST" class="inline">
+                            <button type="submit" title="{{ 'Pause tracking' if game.active else 'Resume tracking' }}"
+                                    class="text-yellow-600 hover:text-yellow-800 text-sm font-medium">
+                                {{ '⏸' if game.active else '▶️' }}
+                            </button>
+                        </form>
+                        <!-- Delete -->
+                        <form action="/delete-game/{{ game.id }}" method="POST" class="inline" 
+                              onsubmit="return confirm('Delete {{ game.name }} and all its articles? This cannot be undone.')">
+                            <button type="submit" title="Delete game"
+                                    class="text-red-600 hover:text-red-800 text-sm font-medium">🗑</button>
+                        </form>
+                    </div>
                 </td>
             </tr>
             {% else %}
