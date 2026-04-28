@@ -2,6 +2,7 @@ from flask import Flask, render_template, request, jsonify, send_file, redirect,
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime, timedelta
 import requests
+import feedparser
 from textblob import TextBlob
 import json
 import os
@@ -10,20 +11,19 @@ from io import BytesIO
 from apscheduler.schedulers.background import BackgroundScheduler
 import logging
 import atexit
+import urllib.parse
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-key-please-change')
 
-# Use PostgreSQL if DATABASE_URL is set, otherwise SQLite
+# Use PostgreSQL if DATABASE_URL is set
 database_url = os.getenv('DATABASE_URL')
 if database_url:
-    # Render uses postgres://, but SQLAlchemy needs postgresql://
     if database_url.startswith('postgres://'):
         database_url = database_url.replace('postgres://', 'postgresql://', 1)
     app.config['SQLALCHEMY_DATABASE_URI'] = database_url
 else:
     app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///pr_tracker.db'
-
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
@@ -31,7 +31,6 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ==================== MODELS ====================
-
 class Game(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(200), nullable=False, unique=True)
@@ -70,15 +69,49 @@ class Article(db.Model):
 with app.app_context():
     db.create_all()
 
-# ==================== SEARCH (GNews only) ====================
+# ==================== SEARCH FUNCTIONS ====================
 
-def search_gnews(game_name, start_date=None, end_date=None, days_back=1):
-    """Search GNews API – returns list of article dicts"""
+def search_google_news_rss(game_name, when='7d'):
+    """
+    Search Google News RSS (free, no key).
+    when: '1d', '7d', '30d', etc.
+    Returns list of article dicts.
+    """
+    query = urllib.parse.quote(game_name)
+    url = f"https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en&when={when}"
+    articles = []
+    try:
+        resp = requests.get(url, timeout=10, headers={'User-Agent': 'Mozilla/5.0'})
+        resp.raise_for_status()
+        feed = feedparser.parse(resp.content)
+        for entry in feed.entries:
+            # Extract source name from the feed's title or the entry source
+            source = feed.feed.title if feed.feed.title else 'Google News'
+            pub_date = None
+            if hasattr(entry, 'published_parsed') and entry.published_parsed:
+                pub_date = datetime(*entry.published_parsed[:6])
+            elif hasattr(entry, 'updated_parsed') and entry.updated_parsed:
+                pub_date = datetime(*entry.updated_parsed[:6])
+            else:
+                pub_date = datetime.now()
+            articles.append({
+                'title': entry.title,
+                'url': entry.link,
+                'source_name': source,
+                'published_at': pub_date,
+                'description': entry.get('summary', '')[:1000],
+                'image_url': ''
+            })
+        logger.info(f"Google News RSS returned {len(articles)} articles for '{game_name}'")
+    except Exception as e:
+        logger.error(f"Google News RSS error for '{game_name}': {e}")
+    return articles
+
+def search_gnews_api(game_name, start_date=None, end_date=None, days_back=1):
+    """Fallback: GNews API if key is available."""
     api_key = os.getenv('GNEWS_API_KEY', '')
     if not api_key:
-        logger.warning("No GNEWS_API_KEY set")
         return []
-
     url = "https://gnews.io/api/v4/search"
     params = {
         'q': game_name,
@@ -92,9 +125,7 @@ def search_gnews(game_name, start_date=None, end_date=None, days_back=1):
     if end_date:
         params['to'] = end_date.strftime('%Y-%m-%dT%H:%M:%SZ')
     else:
-        # default to last N days if no end date
         params['from'] = (datetime.now() - timedelta(days=days_back)).strftime('%Y-%m-%dT%H:%M:%SZ')
-
     try:
         resp = requests.get(url, params=params, timeout=15)
         resp.raise_for_status()
@@ -105,16 +136,53 @@ def search_gnews(game_name, start_date=None, end_date=None, days_back=1):
                 'title': item['title'],
                 'url': item['url'],
                 'source_name': item['source']['name'],
-                'published_at': datetime.strptime(item['publishedAt'][:19],
-                                                  '%Y-%m-%dT%H:%M:%S'),
+                'published_at': datetime.strptime(item['publishedAt'][:19], '%Y-%m-%dT%H:%M:%S'),
                 'description': item.get('description', ''),
                 'image_url': item.get('image', '')
             })
-        logger.info(f"GNews returned {len(articles)} articles for '{game_name}'")
+        logger.info(f"GNews API returned {len(articles)} articles for '{game_name}'")
         return articles
     except Exception as e:
         logger.error(f"GNews API error for '{game_name}': {e}")
         return []
+
+def fetch_all_articles(game, start_date=None, end_date=None):
+    """
+    Combine Google News RSS + GNews API.
+    For date range, Google News RSS uses 'when' parameter,
+    so we fetch a wide window (30d) and filter manually.
+    """
+    # Determine the 'when' parameter for Google News
+    if start_date and end_date:
+        delta = (end_date - start_date).days
+        when = f'{delta}d'
+    else:
+        when = '7d'  # default
+
+    articles = []
+    # Primary: Google News RSS
+    articles.extend(search_google_news_rss(game.name, when=when))
+
+    # Fallback: GNews API (only if key exists)
+    articles.extend(search_gnews_api(game.name, start_date=start_date, end_date=end_date))
+
+    # If a custom date range is given, filter articles by published_at
+    if start_date and end_date:
+        filtered = []
+        for art in articles:
+            pub = art.get('published_at')
+            if pub and start_date <= pub <= end_date:
+                filtered.append(art)
+        articles = filtered
+
+    # Deduplicate by URL
+    seen = set()
+    unique = []
+    for art in articles:
+        if art['url'] not in seen:
+            seen.add(art['url'])
+            unique.append(art)
+    return unique
 
 def analyze_sentiment(text):
     try:
@@ -156,7 +224,6 @@ def save_articles(game, articles_list):
     return saved
 
 # ==================== ROUTES ====================
-
 @app.route('/')
 def dashboard():
     games = Game.query.filter_by(active=True).all()
@@ -199,12 +266,12 @@ def add_game():
                 keywords=json.dumps(keywords))
     db.session.add(game)
     db.session.commit()
-    # initial quick search (last 1 day)
-    articles = search_gnews(game.name, days_back=1)
+    # initial search (last 7 days)
+    articles = fetch_all_articles(game)
     count = save_articles(game, articles)
     game.last_searched = datetime.utcnow()
     db.session.commit()
-    logger.info(f"Added '{name}' – {count} initial articles from GNews")
+    logger.info(f"Added '{name}' – {count} initial articles")
     return redirect(url_for('games_page'))
 
 @app.route('/toggle-game/<int:game_id>', methods=['POST'])
@@ -238,7 +305,7 @@ def search_game_now(game_id):
             end_date = datetime.strptime(end_str, '%Y-%m-%d') + timedelta(days=1)
         except:
             pass
-    articles = search_gnews(game.name, start_date=start_date, end_date=end_date)
+    articles = fetch_all_articles(game, start_date=start_date, end_date=end_date)
     count = save_articles(game, articles)
     game.last_searched = datetime.utcnow()
     db.session.commit()
@@ -251,7 +318,7 @@ def search_all_games():
     results = []
     for game in games:
         try:
-            articles = search_gnews(game.name, days_back=1)
+            articles = fetch_all_articles(game)
             count = save_articles(game, articles)
             game.last_searched = datetime.utcnow()
             results.append({'game': game.name, 'articles_found': count, 'status': 'success'})
@@ -382,7 +449,7 @@ def daily_search():
     total = 0
     for game in games:
         try:
-            articles = search_gnews(game.name, days_back=1)
+            articles = fetch_all_articles(game)
             count = save_articles(game, articles)
             game.last_searched = datetime.utcnow()
             total += count
@@ -399,7 +466,7 @@ def init_scheduler():
             games = Game.query.filter_by(active=True).all()
             for game in games:
                 try:
-                    articles = search_gnews(game.name, days_back=1)
+                    articles = fetch_all_articles(game)
                     save_articles(game, articles)
                     game.last_searched = datetime.utcnow()
                 except Exception as e:
