@@ -13,126 +13,12 @@ import logging
 import atexit
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
-# Expanded source reach database (monthly unique visitors, based on SimilarWeb/public data)
-SOURCE_REACH = {
-    # Major Gaming Sites
-    'ign': 92_000_000, 'gamespot': 40_000_000, 'pcgamer': 15_000_000,
-    'eurogamer': 9_000_000, 'polygon': 14_000_000, 'kotaku': 7_500_000,
-    'gamesradar': 13_000_000, 'rockpapershotgun': 5_900_000,
-    'vg247': 2_200_000, 'destructoid': 5_300_000, 'nintendolife': 6_900_000,
-    'pushsquare': 3_000_000, 'trueachievements': 5_000_000,
-    'screenrant': 44_000_000, 'gamerant': 23_000_000,
-    'dualshockers': 1_700_000, 'gematsu': 1_500_000,
-    'rpgamer': 200_000, 'rpgsite': 1_900_000, 'gameinformer': 1_600_000,
-    'toucharcade': 365_000, 'pocketgamer': 2_200_000,
-    'siliconera': 1_000_000, 'rpgfan': 490_000, 'mmorpg': 930_000,
-    'shacknews': 1_300_000, 'gamingbolt': 590_000, 'wccftech': 3_400_000,
-    'pcgamesn': 4_000_000, 'gamedeveloper': 830_000,
-    'gamedaily': 170_000, 'videogameschronicle': 4_000_000,
-    'venturebeat': 2_400_000, 'gamewatcher': 440_000,
-    'comicbook': 14_000_000, 'dexerto': 4_700_000,
-    
-    # General News (gaming sections)
-    'nme': 5_300_000, 'metro': 15_000_000, 'theguardian': 349_000_000,
-    'nytimes': 676_000_000, 'forbes': 78_000_000,
-    'washingtonpost': 89_000_000, 'variety': 29_000_000,
-    'vice': 9_800_000, 'inverse': 2_300_000,
-    'digitaltrends': 18_000_000, 'techradar': 18_000_000,
-    'pcworld': 2_500_000, 'pcmag': 14_000_000,
-    'telegraph': 63_000_000, 'independent': 62_000_000,
-    'dailystar': 8_800_000, 'ladbible': 9_400_000,
-    'sportingnews': 15_000_000, 'si': 39_000_000,
-    'time': 11_000_000, 'radiotimes': 13_000_000,
-    'digitalspy': 9_500_000, 'vgchartz': 680_000,
-    'insider-gaming': 2_200_000,
-    'bleedingcool': 3_200_000, 'escapist': 1_300_000,
-    
-    # European Gaming
-    '3djuegos': 10_000_000, 'meristation': 1_300_000,
-    'hobbyconsolas': 9_000_000, 'vandal': 16_000_000,
-    'eurogamer.es': 780_000, 'jeuxvideo': 29_000_000,
-    'gameblog': 2_900_000, 'jeuxactu': 200_000,
-    'gamepro': 9_000_000, 'gamestar': 15_000_000,
-    'giga': 15_000_000, '4players': 2_700_000,
-    'pcgames': 3_200_000, 'eurogamer.de': 3_700_000,
-    'everyeye': 7_800_000, 'multiplayer': 5_600_000,
-    'spaziogames': 1_000_000, 'thegamesmachine': 170_000,
-    'gry-online': 8_100_000, 'gram': 1_800_000,
-    'ppe': 5_200_000, 'lowcygier': 3_000_000,
-    'gamer.nl': 10_000, 'pu.nl': 210_000,
-    'xgn.nl': 450_000, 'gamer.no': 800_000,
-    'gamereactor': 600_000, 'fingerguns': 38_000,
-    'darkzero': 25_000, 'thesixthaxis': 375_000,
-    'purexbox': 2_500_000, 'pureplaystation': 1_500_000,
-    'xboxdynasty': 1_100_000, 'xboxachievements': 580_000,
-    
-    # Asian/Pacific
-    'inven': 51_000_000, 'sector': 1_600_000,
-    'indian': 1_100_000, 'gamepressure': 2_300_000,
-    'ixbt': 7_600_000, 'goha': 2_200_000,
-    'rutab': 2_300_000, 'riotpixels': 3_000_000,
-    'newxboxone': 730_000, 'stratege': 1_700_000,
-    'gameshub': 590_000, 'stevivor': 130_000,
-    'press-start': 330_000, 'wellplayed': 100_000,
-    'checkpointgaming': 82_000, 'player2': 23_000,
-    'vooks': 170_000, 'shindig': 3_000,
-    'smh': 25_000_000, 'vg247': 2_200_000,
-    'vg24': 3_000,
-    
-    # Latin America
-    'levelup': 860_000, 'atomix': 540_000,
-    'tierragamer': 150_000, 'meups': 780_000,
-    'psxbrasil': 640_000, 'tecmundo': 8_100_000,
-    'adrenaline': 2_400_000, 'canaltech': 8_300_000,
-    'flowgames': 300_000, 'gamersrd': 24_000,
-    'psxextreme': 52_000, 'gamersegames': 19_000,
-    'pizzafria': 44_000, 'gamefm': 13_000,
-    'defesaperfeita': 7_000, 'dropsdejogos': 94_000,
-    
-    # Default for unknown sources
-    'Google News': 100_000,
-    'Unknown': 50_000,
-}
-
-def estimate_reach(source_name, url=''):
-    """Estimate monthly reach based on source name or URL."""
-    if not source_name:
-        return 50_000
-    
-    text = f"{source_name} {url}".lower()
-    
-    # Direct match first
-    for key, reach in SOURCE_REACH.items():
-        if key in text:
-            return reach
-    
-    # If no match, estimate based on source characteristics
-    # Major news outlets get higher estimates
-    major_news = ['nytimes', 'guardian', 'washingtonpost', 'forbes', 'wsj', 
-                  'bloomberg', 'reuters', 'bbc', 'cnn', 'telegraph', 'independent']
-    for outlet in major_news:
-        if outlet in text:
-            return 50_000_000  # Major outlets default
-    
-    # Gaming-specific sites get medium estimate
-    gaming_indicators = ['game', 'gaming', 'xbox', 'playstation', 'nintendo', 
-                         'steam', 'esports', 'rpg', 'mmo', 'indie game']
-    if any(ind in text for ind in gaming_indicators):
-        return 200_000  # Small gaming blog default
-    
-    # Tech sites
-    tech_indicators = ['tech', 'digital', 'gadget', 'review', 'ai', 'software']
-    if any(ind in text for ind in tech_indicators):
-        return 500_000  # Tech site default
-    
-    # Regional news
-    return 100_000  # Default for unknown sources
+from functools import wraps
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-key-please-change')
 
-# Use PostgreSQL if DATABASE_URL is set, otherwise SQLite
+# Use PostgreSQL if DATABASE_URL is set
 database_url = os.getenv('DATABASE_URL')
 if database_url:
     if database_url.startswith('postgres://'):
@@ -146,6 +32,21 @@ db = SQLAlchemy(app)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# ==================== AUTHENTICATION (optional) ====================
+AUTH_USERNAME = os.getenv('AUTH_USERNAME', 'admin')
+AUTH_PASSWORD = os.getenv('AUTH_PASSWORD', 'changeme123')
+
+def require_auth(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth = request.authorization
+        if not auth or auth.username != AUTH_USERNAME or auth.password != AUTH_PASSWORD:
+            return jsonify({'error': 'Authentication required'}), 401, {
+                'WWW-Authenticate': 'Basic realm="Game PR Tracker"'
+            }
+        return f(*args, **kwargs)
+    return decorated
+
 # ==================== MODELS ====================
 
 class Game(db.Model):
@@ -153,8 +54,8 @@ class Game(db.Model):
     name = db.Column(db.String(200), nullable=False, unique=True)
     publisher = db.Column(db.String(200))
     platforms = db.Column(db.String(200))
-    keywords = db.Column(db.Text)       # JSON array of search keywords
-    qualifiers = db.Column(db.Text)     # JSON array of required context words
+    keywords = db.Column(db.Text)       # JSON array
+    qualifiers = db.Column(db.Text)     # JSON array
     active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     last_searched = db.Column(db.DateTime)
@@ -178,9 +79,8 @@ class Article(db.Model):
     sentiment_score = db.Column(db.Float)
     sentiment_label = db.Column(db.String(20))
     relevance_score = db.Column(db.Float)
-    reach = db.Column(db.BigInteger)  # estimated monthly unique visitors
     found_at = db.Column(db.DateTime, default=datetime.utcnow)
-    
+    reach = db.Column(db.BigInteger)        # estimated monthly unique visitors
 
     __table_args__ = (
         db.UniqueConstraint('game_id', 'url', name='unique_game_article'),
@@ -188,6 +88,101 @@ class Article(db.Model):
 
 with app.app_context():
     db.create_all()
+
+# ==================== SOURCE REACH DATABASE ====================
+SOURCE_REACH = {
+    # Major gaming
+    'ign': 92_000_000, 'gamespot': 40_000_000, 'pcgamer': 15_000_000,
+    'eurogamer': 9_000_000, 'polygon': 14_000_000, 'kotaku': 7_500_000,
+    'gamesradar': 13_000_000, 'rockpapershotgun': 5_900_000,
+    'vg247': 2_200_000, 'destructoid': 5_300_000, 'nintendolife': 6_900_000,
+    'pushsquare': 3_000_000, 'trueachievements': 5_000_000,
+    'screenrant': 44_000_000, 'gamerant': 23_000_000,
+    'dualshockers': 1_700_000, 'gematsu': 1_500_000,
+    'rpgamer': 200_000, 'rpgsite': 1_900_000, 'gameinformer': 1_600_000,
+    'toucharcade': 365_000, 'pocketgamer': 2_200_000,
+    'siliconera': 1_000_000, 'rpgfan': 490_000, 'mmorpg': 930_000,
+    'shacknews': 1_300_000, 'gamingbolt': 590_000, 'wccftech': 3_400_000,
+    'pcgamesn': 4_000_000, 'gamedeveloper': 830_000,
+    'gamedaily': 170_000, 'videogameschronicle': 4_000_000,
+    'venturebeat': 2_400_000, 'gamewatcher': 440_000,
+    'comicbook': 14_000_000, 'dexerto': 4_700_000,
+    # General news with gaming sections
+    'nme': 5_300_000, 'metro': 15_000_000, 'theguardian': 349_000_000,
+    'nytimes': 676_000_000, 'forbes': 78_000_000,
+    'washingtonpost': 89_000_000, 'variety': 29_000_000,
+    'vice': 9_800_000, 'inverse': 2_300_000,
+    'digitaltrends': 18_000_000, 'techradar': 18_000_000,
+    'pcworld': 2_500_000, 'pcmag': 14_000_000,
+    'telegraph': 63_000_000, 'independent': 62_000_000,
+    'dailystar': 8_800_000, 'ladbible': 9_400_000,
+    'sportingnews': 15_000_000, 'si': 39_000_000,
+    'time': 11_000_000, 'radiotimes': 13_000_000,
+    'digitalspy': 9_500_000, 'vgchartz': 680_000,
+    'insider-gaming': 2_200_000, 'bleedingcool': 3_200_000,
+    'escapist': 1_300_000,
+    # European
+    '3djuegos': 10_000_000, 'meristation': 1_300_000,
+    'hobbyconsolas': 9_000_000, 'vandal': 16_000_000,
+    'jeuxvideo': 29_000_000, 'gameblog': 2_900_000,
+    'jeuxactu': 200_000, 'gamepro': 9_000_000,
+    'gamestar': 15_000_000, 'giga': 15_000_000,
+    '4players': 2_700_000, 'pcgames': 3_200_000,
+    'eurogamer.de': 3_700_000, 'everyeye': 7_800_000,
+    'multiplayer': 5_600_000, 'spaziogames': 1_000_000,
+    'thegamesmachine': 170_000, 'gry-online': 8_100_000,
+    'gram': 1_800_000, 'ppe': 5_200_000,
+    'lowcygier': 3_000_000, 'gamer.nl': 10_000,
+    'pu.nl': 210_000, 'xgn.nl': 450_000,
+    'gamer.no': 800_000, 'gamereactor': 600_000,
+    'fingerguns': 38_000, 'darkzero': 25_000,
+    'thesixthaxis': 375_000, 'purexbox': 2_500_000,
+    'pureplaystation': 1_500_000, 'xboxdynasty': 1_100_000,
+    'xboxachievements': 580_000,
+    # Asia/Pacific
+    'inven': 51_000_000, 'sector': 1_600_000,
+    'indian': 1_100_000, 'gamepressure': 2_300_000,
+    'ixbt': 7_600_000, 'goha': 2_200_000,
+    'rutab': 2_300_000, 'riotpixels': 3_000_000,
+    'newxboxone': 730_000, 'stratege': 1_700_000,
+    'gameshub': 590_000, 'stevivor': 130_000,
+    'press-start': 330_000, 'wellplayed': 100_000,
+    'checkpointgaming': 82_000, 'player2': 23_000,
+    'vooks': 170_000, 'shindig': 3_000,
+    'smh': 25_000_000,
+    # Latin America
+    'levelup': 860_000, 'atomix': 540_000,
+    'tierragamer': 150_000, 'meups': 780_000,
+    'psxbrasil': 640_000, 'tecmundo': 8_100_000,
+    'adrenaline': 2_400_000, 'canaltech': 8_300_000,
+    'flowgames': 300_000, 'gamersrd': 24_000,
+    'psxextreme': 52_000, 'gamersegames': 19_000,
+    'pizzafria': 44_000, 'gamefm': 13_000,
+    'defesaperfeita': 7_000, 'dropsdejogos': 94_000,
+    # Defaults
+    'Google News': 100_000,
+    'Unknown': 50_000,
+}
+
+def estimate_reach(source_name, url=''):
+    if not source_name:
+        return 50_000
+    text = f"{source_name} {url}".lower()
+    for key, reach in SOURCE_REACH.items():
+        if key in text:
+            return reach
+    # fallback guesses
+    major_news = ['nytimes', 'guardian', 'washingtonpost', 'forbes', 'wsj',
+                  'bloomberg', 'reuters', 'bbc', 'cnn', 'telegraph', 'independent']
+    for outlet in major_news:
+        if outlet in text:
+            return 50_000_000
+    if any(ind in text for ind in ['game', 'gaming', 'xbox', 'playstation', 'nintendo',
+                                   'steam', 'esports', 'rpg', 'mmo', 'indie game']):
+        return 200_000
+    if any(ind in text for ind in ['tech', 'digital', 'gadget', 'review', 'ai', 'software']):
+        return 500_000
+    return 100_000
 
 # ==================== MULTI-REGION GOOGLE NEWS RSS ====================
 
@@ -222,9 +217,23 @@ REGIONS = {
     'China': [('CN','zh')],
 }
 
-def _fetch_single_rss(game_name, country_code, lang_code, when='7d'):
-    """Fetch Google News RSS for one country/language pair."""
-    query = urllib.parse.quote(game_name)
+def _fetch_single_rss(game_name, country_code, lang_code, when='7d', qualifiers=None):
+    """Fetch Google News RSS for one country/language pair, with optional qualifiers."""
+    if qualifiers:
+        or_groups = []
+        for q in qualifiers:
+            q = q.strip()
+            if '+' in q:
+                and_parts = [p.strip() for p in q.split('+')]
+                or_groups.append(' '.join(and_parts))
+            else:
+                or_groups.append(q)
+        qualifier_str = ' OR '.join(f'"{g}"' for g in or_groups)
+        search_query = f'"{game_name}" AND ({qualifier_str})'
+    else:
+        search_query = game_name
+
+    query = urllib.parse.quote(search_query)
     ceid = f'{country_code}:{lang_code}' if lang_code else f'{country_code}'
     url = f"https://news.google.com/rss/search?q={query}&hl={lang_code}-{country_code}&gl={country_code}&ceid={ceid}&when={when}"
     articles = []
@@ -240,19 +249,16 @@ def _fetch_single_rss(game_name, country_code, lang_code, when='7d'):
                 pub_date = datetime(*entry.updated_parsed[:6])
             else:
                 pub_date = datetime.now()
-            
-            # Extract real source name
+            # Real source name
             source_name = 'Unknown'
             if hasattr(entry, 'source') and entry.source:
                 source_name = entry.source.get('title', 'Unknown')
             else:
-                # Fallback: parse from title "Title - Source"
                 parts = entry.title.rsplit(' - ', 1)
                 if len(parts) == 2:
                     source_name = parts[1].strip()
                 else:
                     source_name = feed.feed.get('title', 'Google News')
-
             articles.append({
                 'title': entry.title,
                 'url': entry.link,
@@ -265,7 +271,7 @@ def _fetch_single_rss(game_name, country_code, lang_code, when='7d'):
         logger.warning(f"Google News RSS error for {country_code}/{lang_code}: {e}")
     return articles
 
-def search_google_news_rss(game_name, when='7d'):
+def search_google_news_rss(game_name, when='7d', qualifiers=None):
     """Search across all regions in parallel, deduplicate by URL."""
     pairs = set()
     for region_pairs in REGIONS.values():
@@ -275,7 +281,7 @@ def search_google_news_rss(game_name, when='7d'):
     all_articles = []
     with ThreadPoolExecutor(max_workers=8) as executor:
         futures = {
-            executor.submit(_fetch_single_rss, game_name, cc, lc, when): (cc, lc)
+            executor.submit(_fetch_single_rss, game_name, cc, lc, when, qualifiers): (cc, lc)
             for (cc, lc) in pairs
         }
         for future in as_completed(futures):
@@ -285,7 +291,6 @@ def search_google_news_rss(game_name, when='7d'):
             except Exception as e:
                 logger.warning(f"Future error: {e}")
 
-    # Deduplicate by URL
     seen_urls = set()
     unique_articles = []
     for art in all_articles:
@@ -336,15 +341,23 @@ def search_gnews_api(game_name, start_date=None, end_date=None, days_back=1):
         return []
 
 def fetch_all_articles(game, start_date=None, end_date=None):
-    """Combine Google News RSS + GNews API, with date filtering."""
+    """Combine Google News RSS + GNews API, with date filtering and qualifier support."""
     if start_date and end_date:
         delta = max((end_date - start_date).days, 1)
         when = f'{delta}d'
     else:
         when = '7d'
 
+    # Parse qualifiers for this game
+    game_qualifiers = None
+    if game.qualifiers:
+        try:
+            game_qualifiers = json.loads(game.qualifiers)
+        except:
+            pass
+
     articles = []
-    articles.extend(search_google_news_rss(game.name, when=when))
+    articles.extend(search_google_news_rss(game.name, when=when, qualifiers=game_qualifiers))
     articles.extend(search_gnews_api(game.name, start_date=start_date, end_date=end_date))
 
     if start_date and end_date:
@@ -355,7 +368,7 @@ def fetch_all_articles(game, start_date=None, end_date=None):
                 filtered.append(art)
         articles = filtered
 
-    # Final deduplication
+    # Final dedup
     seen = set()
     unique = []
     for art in articles:
@@ -366,20 +379,10 @@ def fetch_all_articles(game, start_date=None, end_date=None):
 
 # ==================== FALSE-POSITIVE FILTERING ====================
 
-def is_gaming_article(title, description, game_name, qualifiers=None):
-    """
-    Check if article is actually about the game, not a false positive.
-    Supports AND (+) and OR (,) logic in qualifiers.
-    
-    Examples:
-        "game, xbox, steam"          → matches any one of these (OR)
-        "game + steam"               → must match BOTH (AND)
-        "game, xbox + steam + deck"  → (game OR xbox) AND steam AND deck
-    """
+def is_gaming_article(title, description, game_name, qualifiers=None, strict_mode=False):
     text = f"{title} {description}".lower()
     game_lower = game_name.lower()
 
-    # Default gaming context words (always checked as OR)
     default_gaming_terms = [
         'game', 'gaming', 'xbox', 'playstation', 'ps5', 'ps4', 'nintendo',
         'switch', 'steam', 'pc game', 'video game', 'dlc', 'update', 'patch',
@@ -387,7 +390,6 @@ def is_gaming_article(title, description, game_name, qualifiers=None):
         'rpg', 'fps', 'indie', 'esports', 'review', 'score', 'deck'
     ]
 
-    # Parse custom qualifiers
     custom_terms = []
     if qualifiers:
         try:
@@ -395,50 +397,39 @@ def is_gaming_article(title, description, game_name, qualifiers=None):
         except:
             pass
 
-    # If no custom qualifiers, just check default terms
-    if not custom_terms:
-        for term in default_gaming_terms:
+    if strict_mode and custom_terms:
+        if game_lower not in text:
+            return False
+        or_groups = []
+        current_group = []
+        for term in custom_terms:
+            term = term.strip()
+            if '+' in term:
+                and_terms = [t.strip() for t in term.split('+')]
+                or_groups.append({'type': 'AND', 'terms': and_terms})
+            else:
+                current_group.append(term)
+        if current_group:
+            or_groups.append({'type': 'OR', 'terms': current_group})
+        for group in or_groups:
+            if group['type'] == 'AND':
+                if all(t.lower() in text for t in group['terms']):
+                    return True
+            else:
+                if any(t.lower() in text for t in group['terms']):
+                    return True
+        return False
+    else:
+        all_terms = default_gaming_terms.copy()
+        if custom_terms:
+            for t in custom_terms:
+                all_terms.append(t.strip().lower())
+        for term in all_terms:
             if term.lower() in text:
                 return True
         return False
 
-    # Parse qualifier string into AND/OR groups
-    # Split by comma first (OR groups), then by + (AND within groups)
-    or_groups = []
-    current_group = []
-    
-    for term in custom_terms:
-        term = term.strip()
-        if '+' in term:
-            # This is an AND group: "game + steam"
-            and_terms = [t.strip() for t in term.split('+')]
-            or_groups.append({'type': 'AND', 'terms': and_terms})
-        else:
-            current_group.append(term)
-    
-    # Remaining terms are OR
-    if current_group:
-        or_groups.append({'type': 'OR', 'terms': current_group})
-
-    # Also include default terms as an OR group
-    or_groups.append({'type': 'OR', 'terms': default_gaming_terms})
-
-    # Check each group
-    for group in or_groups:
-        if group['type'] == 'AND':
-            # ALL terms must be found
-            if all(term.lower() in text for term in group['terms']):
-                return True
-        else:  # OR
-            # ANY term must be found
-            if any(term.lower() in text for term in group['terms']):
-                return True
-
-    # If no group matched, fail
-    return False
-
 def is_gaming_source(source_name, url=''):
-    """Check if the source appears to be a gaming outlet."""
     gaming_domains = [
         'ign', 'gamespot', 'pcgamer', 'eurogamer', 'polygon', 'kotaku',
         'gamesradar', 'rockpapershotgun', 'vg247', 'destructoid', 'nintendolife',
@@ -471,16 +462,16 @@ def analyze_sentiment(text):
 # ==================== SAVE ARTICLES ====================
 
 def save_articles(game, articles_list):
-    """Save articles to database, filtering out false positives."""
     saved = 0
     skipped = 0
-
     qualifiers = None
     if game.qualifiers:
         try:
             qualifiers = json.loads(game.qualifiers)
         except:
             pass
+
+    strict = bool(qualifiers)
 
     for art in articles_list:
         existing = Article.query.filter_by(game_id=game.id, url=art['url']).first()
@@ -492,17 +483,14 @@ def save_articles(game, articles_list):
         source_name = art.get('source_name', '')
         url = art.get('url', '')
 
-        # Gaming filter
-        is_gaming = is_gaming_article(title, description, game.name, qualifiers)
+        is_gaming = is_gaming_article(title, description, game.name, qualifiers, strict_mode=strict)
         is_gaming_src = is_gaming_source(source_name, url)
-
         if not is_gaming and not is_gaming_src:
             skipped += 1
             continue
 
         score, label = analyze_sentiment(f"{title} {description}")
         reach = estimate_reach(source_name, url)
-        
         article = Article(
             game_id=game.id,
             title=title[:500],
@@ -526,19 +514,8 @@ def save_articles(game, articles_list):
 
 # ==================== ROUTES ====================
 
-@app.route('/delete-article/<int:article_id>', methods=['POST'])
-def delete_article(article_id):
-    """Delete a single article (for removing false positives)."""
-    article = Article.query.get_or_404(article_id)
-    game_id = article.game_id
-    db.session.delete(article)
-    db.session.commit()
-    logger.info(f"Deleted article: {article.title[:100]}")
-    
-    # Redirect back to the articles page for that game
-    return redirect(url_for('articles_page', game_id=game_id))
-
 @app.route('/')
+# @require_auth       # uncomment to protect
 def dashboard():
     games = Game.query.filter_by(active=True).all()
     total_articles = Article.query.count()
@@ -560,11 +537,13 @@ def dashboard():
                          game_stats=game_stats)
 
 @app.route('/games')
+# @require_auth
 def games_page():
     all_games = Game.query.order_by(Game.name).all()
     return render_template('games.html', games=all_games)
 
 @app.route('/add-game', methods=['POST'])
+# @require_auth
 def add_game():
     name = request.form.get('name', '').strip()
     publisher = request.form.get('publisher', '').strip()
@@ -654,6 +633,7 @@ def search_all_games():
     return jsonify({'success': True, 'results': results})
 
 @app.route('/articles')
+# @require_auth
 def articles_page():
     game_id = request.args.get('game_id', type=int)
     sentiment = request.args.get('sentiment', '')
@@ -682,6 +662,7 @@ def articles_page():
                          selected_source=source)
 
 @app.route('/analytics/<int:game_id>')
+# @require_auth
 def analytics_page(game_id):
     game = Game.query.get_or_404(game_id)
     days = request.args.get('days', 30, type=int)
@@ -718,132 +699,102 @@ def analytics_page(game_id):
                          top_articles=top_articles)
 
 @app.route('/export/<int:game_id>')
+# @require_auth
 def export_csv(game_id):
-    """Export articles with full metrics (reach, EMV, sentiment)."""
     game = Game.query.get_or_404(game_id)
     try:
-        articles = Article.query.filter_by(game_id=game_id).order_by(
-            Article.published_at.desc()
-        ).all()
-
+        articles = Article.query.filter_by(game_id=game_id).order_by(Article.published_at.desc()).all()
         si = StringIO()
         writer = csv.writer(si)
-        writer.writerow([
-            'Date', 'Title', 'Source', 'URL', 'Sentiment', 
-            'Sentiment Score', 'Reach (Monthly)', 'EMV (USD)',
-            'Language', 'Region'
-        ])
-
-        # EMV Formula: Reach × CPM ($35) × Sentiment Weight × Article Multiplier
-        CPM = 35  # Cost per 1000 impressions for gaming PR
-        SENTIMENT_WEIGHT = {
-            'positive': 1.2,   # Positive coverage worth more
-            'neutral': 1.0,
-            'negative': 0.8    # Negative still has value (awareness)
-        }
-
+        writer.writerow(['Date', 'Title', 'Source', 'URL', 'Sentiment', 'Sentiment Score',
+                         'Reach (Monthly)', 'EMV (USD)', 'Language', 'Region'])
+        CPM = 35
+        SENTIMENT_WEIGHT = {'positive': 1.2, 'neutral': 1.0, 'negative': 0.8}
         for a in articles:
-            # Calculate EMV
-            base_value = (a.reach or 50000) / 1000 * CPM
-            sentiment_mult = SENTIMENT_WEIGHT.get(a.sentiment_label, 1.0)
-            emv = round(base_value * sentiment_mult, 2)
-
-            # Determine language/region from source
-            lang = 'en'
-            region = 'Global'
-            source_lower = (a.source_name or '').lower()
-            if any(x in source_lower for x in ['de.', '.de', 'germany', 'german']):
-                lang = 'de'; region = 'Germany'
-            elif any(x in source_lower for x in ['fr.', '.fr', 'france', 'french']):
-                lang = 'fr'; region = 'France'
-            elif any(x in source_lower for x in ['es.', '.es', 'spain', 'spanish']):
-                lang = 'es'; region = 'Spain'
-            elif any(x in source_lower for x in ['it.', '.it', 'italy', 'italian']):
-                lang = 'it'; region = 'Italy'
-            elif any(x in source_lower for x in ['pl.', '.pl', 'poland', 'polish']):
-                lang = 'pl'; region = 'Poland'
-            elif any(x in source_lower for x in ['ru.', '.ru', 'russia', 'russian']):
-                lang = 'ru'; region = 'Russia'
-            elif any(x in source_lower for x in ['br.', '.br', 'brazil', 'brazilian']):
-                lang = 'pt'; region = 'Brazil'
-            elif any(x in source_lower for x in ['jp.', '.jp', 'japan', 'japanese']):
-                lang = 'ja'; region = 'Japan'
-            elif any(x in source_lower for x in ['kr.', '.kr', 'korea', 'korean']):
-                lang = 'ko'; region = 'South Korea'
-
+            reach_val = a.reach or 50000
+            base = reach_val / 1000 * CPM
+            mult = SENTIMENT_WEIGHT.get(a.sentiment_label, 1.0)
+            emv = round(base * mult, 2)
+            # simplistic language/region detection
+            lang = 'en'; region = 'Global'
+            src_lower = (a.source_name or '').lower()
+            if any(x in src_lower for x in ['de.', '.de', 'germany']):
+                lang='de'; region='Germany'
+            elif any(x in src_lower for x in ['fr.', '.fr', 'france']):
+                lang='fr'; region='France'
+            elif any(x in src_lower for x in ['es.', '.es', 'spain']):
+                lang='es'; region='Spain'
+            elif any(x in src_lower for x in ['it.', '.it', 'italy']):
+                lang='it'; region='Italy'
+            elif any(x in src_lower for x in ['pl.', '.pl', 'poland']):
+                lang='pl'; region='Poland'
+            elif any(x in src_lower for x in ['ru.', '.ru', 'russia']):
+                lang='ru'; region='Russia'
+            elif any(x in src_lower for x in ['br.', '.br', 'brazil']):
+                lang='pt'; region='Brazil'
+            elif any(x in src_lower for x in ['jp.', '.jp', 'japan']):
+                lang='ja'; region='Japan'
+            elif any(x in src_lower for x in ['kr.', '.kr', 'korea']):
+                lang='ko'; region='South Korea'
             writer.writerow([
                 a.published_at.strftime('%Y-%m-%d') if a.published_at else '',
                 a.title,
                 a.source_name or 'Unknown',
                 a.url,
                 a.sentiment_label or 'neutral',
-                round(a.sentiment_score, 2) if a.sentiment_score else 0,
-                f"{a.reach:,}" if a.reach else '50,000',
+                round(a.sentiment_score,2) if a.sentiment_score else 0,
+                f"{reach_val:,}",
                 f"${emv:,.2f}",
-                lang,
-                region
+                lang, region
             ])
-
         output = BytesIO()
-        output.write(si.getvalue().encode('utf-8-sig'))  # UTF-8 BOM for Excel
+        output.write(si.getvalue().encode('utf-8-sig'))
         output.seek(0)
-
-        return send_file(
-            output,
-            mimetype='text/csv',
-            as_attachment=True,
-            download_name=f'{game.name}_PR_Full_Report.csv'
-        )
+        return send_file(output, mimetype='text/csv', as_attachment=True,
+                         download_name=f'{game.name}_PR_Full_Report.csv')
     except Exception as e:
-        logger.error(f"Export error for game {game_id}: {str(e)}")
-        return jsonify({'error': f'Export failed: {str(e)}'}), 500
+        logger.error(f"Export error: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/weekly-report')
+# @require_auth
 def weekly_report():
-    """Generate weekly PR report"""
     try:
         week_ago = datetime.now() - timedelta(days=7)
         games = Game.query.filter_by(active=True).all()
-
         si = StringIO()
         writer = csv.writer(si)
         writer.writerow(['Game', 'Total Articles', 'Positive', 'Negative', 'Neutral', 'Avg Sentiment'])
-
         for game in games:
-            articles = Article.query.filter(
-                Article.game_id == game.id,
-                Article.published_at >= week_ago
-            ).all()
-
+            articles = Article.query.filter(Article.game_id==game.id, Article.published_at>=week_ago).all()
             if articles:
                 total = len(articles)
-                pos = sum(1 for a in articles if a.sentiment_label == 'positive')
-                neg = sum(1 for a in articles if a.sentiment_label == 'negative')
-                neu = sum(1 for a in articles if a.sentiment_label == 'neutral')
-                avg = round(sum(a.sentiment_score or 0 for a in articles) / total, 2) if total > 0 else 0
-
+                pos = sum(1 for a in articles if a.sentiment_label=='positive')
+                neg = sum(1 for a in articles if a.sentiment_label=='negative')
+                neu = sum(1 for a in articles if a.sentiment_label=='neutral')
+                avg = round(sum(a.sentiment_score or 0 for a in articles)/total, 2)
                 writer.writerow([game.name, total, pos, neg, neu, avg])
-
         output = BytesIO()
         output.write(si.getvalue().encode('utf-8'))
         output.seek(0)
-
-        return send_file(
-            output,
-            mimetype='text/csv',
-            as_attachment=True,
-            download_name=f'Weekly_PR_Report_{datetime.now().strftime("%Y%m%d")}.csv'
-        )
+        return send_file(output, mimetype='text/csv', as_attachment=True,
+                         download_name=f'Weekly_PR_Report_{datetime.now().strftime("%Y%m%d")}.csv')
     except Exception as e:
-        logger.error(f"Weekly report error: {str(e)}")
-        return jsonify({'error': f'Report generation failed: {str(e)}'}), 500
+        logger.error(f"Weekly report error: {e}")
+        return jsonify({'error': str(e)}), 500
 
-# Health check endpoint for cron-job.org
+@app.route('/delete-article/<int:article_id>', methods=['POST'])
+def delete_article(article_id):
+    article = Article.query.get_or_404(article_id)
+    game_id = article.game_id
+    db.session.delete(article)
+    db.session.commit()
+    return redirect(url_for('articles_page', game_id=game_id))
+
 @app.route('/ping')
 def ping():
-    return jsonify({'status': 'ok', 'timestamp': datetime.utcnow().isoformat()})
+    return jsonify({'status': 'ok'})
 
-# Daily search trigger (called by cron-job.org)
 @app.route('/daily-search')
 def daily_search():
     games = Game.query.filter_by(active=True).all()
@@ -854,13 +805,32 @@ def daily_search():
             count = save_articles(game, articles)
             game.last_searched = datetime.utcnow()
             total += count
-            logger.info(f"Daily search: {count} new for {game.name}")
         except Exception as e:
             logger.error(f"Daily search failed for {game.name}: {e}")
     db.session.commit()
     return jsonify({'success': True, 'games_searched': len(games), 'new_articles': total})
 
-# ==================== SCHEDULER (BACKUP) ====================
+@app.route('/fix-db')
+def fix_database():
+    from sqlalchemy import inspect, text
+    inspector = inspect(db.engine)
+    results = []
+    # game columns
+    game_cols = [c['name'] for c in inspector.get_columns('game')]
+    if 'qualifiers' not in game_cols:
+        db.session.execute(text('ALTER TABLE game ADD COLUMN qualifiers TEXT'))
+        results.append('Added qualifiers column to game')
+    # article columns
+    art_cols = [c['name'] for c in inspector.get_columns('article')]
+    if 'reach' not in art_cols:
+        db.session.execute(text('ALTER TABLE article ADD COLUMN reach BIGINT'))
+        results.append('Added reach column to article')
+    db.session.commit()
+    if not results:
+        results.append('All columns already present')
+    return jsonify({'status': 'success', 'messages': results})
+
+# ==================== SCHEDULER ====================
 
 def init_scheduler():
     scheduler = BackgroundScheduler()
@@ -885,31 +855,3 @@ with app.app_context():
 
 if __name__ == '__main__':
     app.run(debug=True)
-
-@app.route('/fix-db')
-def fix_database():
-    """Temporary route to add missing database columns."""
-    try:
-        from sqlalchemy import inspect, text
-        inspector = inspect(db.engine)
-        columns = [col['name'] for col in inspector.get_columns('game')]
-        
-        results = []
-        
-        if 'qualifiers' not in columns:
-            db.session.execute(text('ALTER TABLE game ADD COLUMN qualifiers TEXT'))
-            results.append('Added qualifiers column')
-        
-        article_columns = [col['name'] for col in inspector.get_columns('article')]
-        if 'reach' not in article_columns:
-            db.session.execute(text('ALTER TABLE article ADD COLUMN reach BIGINT'))
-            results.append('Added reach column')
-        
-        db.session.commit()
-        
-        if not results:
-            results.append('All columns already exist!')
-        
-        return jsonify({'status': 'success', 'messages': results})
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)})
