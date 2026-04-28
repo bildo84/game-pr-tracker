@@ -10,6 +10,28 @@
         .sentiment-positive { background-color: #dcfce7; color: #166534; }
         .sentiment-negative { background-color: #fee2e2; color: #991b1b; }
         .sentiment-neutral { background-color: #f3f4f6; color: #374151; }
+        /* Prevent horizontal overflow on article links */
+a {
+    word-break: break-word;
+    overflow-wrap: break-word;
+}
+
+/* Make article cards handle long URLs */
+.article-link {
+    word-break: break-all;
+    overflow-wrap: anywhere;
+}
+
+/* Ensure table cells don't overflow */
+table {
+    table-layout: fixed;
+    width: 100%;
+}
+
+td {
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+}
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
