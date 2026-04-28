@@ -12,6 +12,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 import logging
 import atexit
 import urllib.parse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-key-please-change')
@@ -69,24 +70,50 @@ class Article(db.Model):
 with app.app_context():
     db.create_all()
 
-# ==================== SEARCH FUNCTIONS ====================
+# ==================== MULTI-REGION GOOGLE NEWS RSS ====================
+# (country, language) pairs for each region
+REGIONS = {
+    'NA': [('US','en'), ('CA','en'), ('CA','fr'), ('MX','es')],
+    'EMEA': [
+        ('GB','en'), ('DE','de'), ('FR','fr'), ('ES','es'), ('IT','it'),
+        ('RU','ru'), ('AE','ar'), ('AE','en'), ('ZA','en'), ('NG','en'),
+        ('SE','sv'), ('NO','no'), ('DK','da'), ('FI','fi'),
+        ('NL','nl'), ('BE','nl'), ('BE','fr'), ('CH','de'), ('CH','fr'),
+        ('AT','de'), ('PL','pl'), ('CZ','cs'), ('HU','hu'),
+        ('RO','ro'), ('GR','el'), ('IL','he'), ('SA','ar')
+    ],
+    'EU': [
+        ('GB','en'), ('DE','de'), ('FR','fr'), ('ES','es'), ('IT','it'),
+        ('RU','ru'), ('SE','sv'), ('NO','no'), ('DK','da'), ('FI','fi'),
+        ('NL','nl'), ('BE','nl'), ('BE','fr'), ('CH','de'), ('CH','fr'),
+        ('AT','de'), ('PL','pl'), ('CZ','cs'), ('HU','hu'),
+        ('RO','ro'), ('GR','el')
+    ],
+    'UK': [('GB','en')],
+    'APJ': [
+        ('JP','ja'), ('KR','ko'), ('CN','zh'), ('IN','en'), ('IN','hi'),
+        ('AU','en'), ('NZ','en'), ('SG','en'), ('SG','zh'),
+        ('MY','en'), ('MY','ms'), ('PH','en'), ('TH','th'),
+        ('VN','vi'), ('ID','id')
+    ],
+    'SEA': [
+        ('SG','en'), ('SG','zh'), ('MY','en'), ('MY','ms'),
+        ('PH','en'), ('TH','th'), ('VN','vi'), ('ID','id')
+    ],
+    'China': [('CN','zh')],
+}
 
-def search_google_news_rss(game_name, when='7d'):
-    """
-    Search Google News RSS (free, no key).
-    when: '1d', '7d', '30d', etc.
-    Returns list of article dicts.
-    """
+def _fetch_single_rss(game_name, country_code, lang_code, when='7d'):
+    """Fetch Google News RSS for one country/language pair, return article list."""
     query = urllib.parse.quote(game_name)
-    url = f"https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en&when={when}"
+    ceid = f'{country_code}:{lang_code}' if lang_code else f'{country_code}'
+    url = f"https://news.google.com/rss/search?q={query}&hl={lang_code}-{country_code}&gl={country_code}&ceid={ceid}&when={when}"
     articles = []
     try:
         resp = requests.get(url, timeout=10, headers={'User-Agent': 'Mozilla/5.0'})
         resp.raise_for_status()
         feed = feedparser.parse(resp.content)
         for entry in feed.entries:
-            # Extract source name from the feed's title or the entry source
-            source = feed.feed.title if feed.feed.title else 'Google News'
             pub_date = None
             if hasattr(entry, 'published_parsed') and entry.published_parsed:
                 pub_date = datetime(*entry.published_parsed[:6])
@@ -97,15 +124,47 @@ def search_google_news_rss(game_name, when='7d'):
             articles.append({
                 'title': entry.title,
                 'url': entry.link,
-                'source_name': source,
+                'source_name': feed.feed.title if feed.feed.get('title') else f'Google News {country_code}',
                 'published_at': pub_date,
                 'description': entry.get('summary', '')[:1000],
                 'image_url': ''
             })
-        logger.info(f"Google News RSS returned {len(articles)} articles for '{game_name}'")
     except Exception as e:
-        logger.error(f"Google News RSS error for '{game_name}': {e}")
+        logger.warning(f"Google News RSS error for {country_code}/{lang_code}: {e}")
     return articles
+
+def search_google_news_rss(game_name, when='7d'):
+    """Search across all defined regions (in parallel), deduplicate by URL."""
+    # Collect all unique (country, language) pairs
+    pairs = set()
+    for region_pairs in REGIONS.values():
+        for pair in region_pairs:
+            pairs.add(pair)
+
+    all_articles = []
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = {
+            executor.submit(_fetch_single_rss, game_name, cc, lc, when): (cc, lc)
+            for (cc, lc) in pairs
+        }
+        for future in as_completed(futures):
+            cc, lc = futures[future]
+            try:
+                result = future.result()
+                all_articles.extend(result)
+            except Exception as e:
+                logger.warning(f"Future error for {cc}/{lc}: {e}")
+
+    # Deduplicate by URL
+    seen_urls = set()
+    unique_articles = []
+    for art in all_articles:
+        if art['url'] not in seen_urls:
+            seen_urls.add(art['url'])
+            unique_articles.append(art)
+
+    logger.info(f"Google News RSS: {len(unique_articles)} unique articles for '{game_name}' across regions")
+    return unique_articles
 
 def search_gnews_api(game_name, start_date=None, end_date=None, days_back=1):
     """Fallback: GNews API if key is available."""
@@ -152,21 +211,16 @@ def fetch_all_articles(game, start_date=None, end_date=None):
     For date range, Google News RSS uses 'when' parameter,
     so we fetch a wide window (30d) and filter manually.
     """
-    # Determine the 'when' parameter for Google News
     if start_date and end_date:
-        delta = (end_date - start_date).days
+        delta = max((end_date - start_date).days, 1)
         when = f'{delta}d'
     else:
-        when = '7d'  # default
+        when = '7d'
 
     articles = []
-    # Primary: Google News RSS
     articles.extend(search_google_news_rss(game.name, when=when))
-
-    # Fallback: GNews API (only if key exists)
     articles.extend(search_gnews_api(game.name, start_date=start_date, end_date=end_date))
 
-    # If a custom date range is given, filter articles by published_at
     if start_date and end_date:
         filtered = []
         for art in articles:
@@ -175,7 +229,7 @@ def fetch_all_articles(game, start_date=None, end_date=None):
                 filtered.append(art)
         articles = filtered
 
-    # Deduplicate by URL
+    # Final deduplication
     seen = set()
     unique = []
     for art in articles:
@@ -266,7 +320,6 @@ def add_game():
                 keywords=json.dumps(keywords))
     db.session.add(game)
     db.session.commit()
-    # initial search (last 7 days)
     articles = fetch_all_articles(game)
     count = save_articles(game, articles)
     game.last_searched = datetime.utcnow()
