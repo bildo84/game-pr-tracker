@@ -240,10 +240,23 @@ def _fetch_single_rss(game_name, country_code, lang_code, when='7d'):
                 pub_date = datetime(*entry.updated_parsed[:6])
             else:
                 pub_date = datetime.now()
+            
+            # Extract real source name
+            source_name = 'Unknown'
+            if hasattr(entry, 'source') and entry.source:
+                source_name = entry.source.get('title', 'Unknown')
+            else:
+                # Fallback: parse from title "Title - Source"
+                parts = entry.title.rsplit(' - ', 1)
+                if len(parts) == 2:
+                    source_name = parts[1].strip()
+                else:
+                    source_name = feed.feed.get('title', 'Google News')
+
             articles.append({
                 'title': entry.title,
                 'url': entry.link,
-                'source_name': feed.feed.get('title', f'Google News {country_code}'),
+                'source_name': source_name,
                 'published_at': pub_date,
                 'description': entry.get('summary', '')[:1000],
                 'image_url': ''
