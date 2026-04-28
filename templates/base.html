@@ -32,6 +32,28 @@ td {
     word-wrap: break-word;
     overflow-wrap: break-word;
 }
+      /* Fix for long URLs in article cards */
+a {
+    word-break: break-word;
+    overflow-wrap: break-word;
+}
+
+/* Ensure article card containers don't overflow */
+.bg-white.rounded-xl {
+    overflow-wrap: break-word;
+    word-break: break-word;
+}
+
+/* Table fixes */
+table {
+    table-layout: fixed;
+    width: 100%;
+}
+
+td {
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+}  
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
