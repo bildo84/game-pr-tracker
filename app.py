@@ -439,6 +439,21 @@ def is_gaming_article(title, description, game_name, qualifiers=None):
     # If no group matched, fail
     return False
 
+def is_gaming_source(source_name, url=''):
+    """Check if the source appears to be a gaming outlet."""
+    gaming_domains = [
+        'ign', 'gamespot', 'pcgamer', 'eurogamer', 'polygon', 'kotaku',
+        'gamesradar', 'rockpapershotgun', 'vg247', 'destructoid', 'nintendolife',
+        'pushsquare', 'trueachievements', 'screenrant', 'gamerant', 'dualshockers',
+        'gematsu', 'rpgamer', 'rpgsite', 'gameinformer', 'toucharcade',
+        'pocketgamer', 'siliconera', 'rpgfan', 'mmorpg', 'shacknews',
+        'venturebeat/games', 'videogameschronicle', 'gamingbolt', 'wccftech',
+        'gamewatcher', 'pcgamesn', 'gamedeveloper', 'gamedaily', 'gaming',
+        'xbox', 'playstation', 'nintendo', 'steam deck'
+    ]
+    check_text = f"{source_name} {url}".lower()
+    return any(domain in check_text for domain in gaming_domains)
+
 # ==================== SENTIMENT ANALYSIS ====================
 
 def analyze_sentiment(text):
