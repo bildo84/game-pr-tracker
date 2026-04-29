@@ -345,15 +345,14 @@ def search_gnews_api(game_name, start_date=None, end_date=None, days_back=1):
         logger.error(f"GNews API error for '{game_name}': {e}")
         return []
 
-def fetch_all_articles(game, start_date=None, end_date=None):
-    """Combine Google News RSS + GNews API, with date filtering and qualifier support."""
+def fetch_all_articles(game, start_date=None, end_date=None, quick=False):
+    """Combine Google News RSS + GNews API."""
     if start_date and end_date:
         delta = max((end_date - start_date).days, 1)
         when = f'{delta}d'
     else:
         when = '7d'
 
-    # Parse qualifiers for this game
     game_qualifiers = None
     if game.qualifiers:
         try:
@@ -362,9 +361,16 @@ def fetch_all_articles(game, start_date=None, end_date=None):
             pass
 
     articles = []
-    articles.extend(search_google_news_rss(game.name, when=when, qualifiers=game_qualifiers))
+    # Quick mode: only scan key regions
+    if quick:
+        max_pairs = 10  # only 10 country/language pairs
+    else:
+        max_pairs = None  # all pairs
+    
+    articles.extend(search_google_news_rss(game.name, when=when, qualifiers=game_qualifiers, max_pairs=max_pairs))
     articles.extend(search_gnews_api(game.name, start_date=start_date, end_date=end_date))
 
+    # ... rest unchanged
     if start_date and end_date:
         filtered = []
         for art in articles:
