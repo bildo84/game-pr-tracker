@@ -633,7 +633,7 @@ def search_all_games():
     results = []
     for game in games:
         try:
-            articles = fetch_all_articles(game)
+            articles = fetch_all_articles(game, quick=True)  # quick mode
             count = save_articles(game, articles)
             game.last_searched = datetime.utcnow()
             results.append({'game': game.name, 'articles_found': count, 'status': 'success'})
