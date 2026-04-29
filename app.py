@@ -271,12 +271,17 @@ def _fetch_single_rss(game_name, country_code, lang_code, when='7d', qualifiers=
         logger.warning(f"Google News RSS error for {country_code}/{lang_code}: {e}")
     return articles
 
-def search_google_news_rss(game_name, when='7d', qualifiers=None):
+def search_google_news_rss(game_name, when='7d', qualifiers=None, max_pairs=None):
     """Search across all regions in parallel, deduplicate by URL."""
     pairs = set()
     for region_pairs in REGIONS.values():
         for pair in region_pairs:
             pairs.add(pair)
+    
+    # Limit the number of region/language pairs if specified
+    if max_pairs and len(pairs) > max_pairs:
+        import random
+        pairs = set(random.sample(list(pairs), max_pairs))
 
     all_articles = []
     with ThreadPoolExecutor(max_workers=8) as executor:
